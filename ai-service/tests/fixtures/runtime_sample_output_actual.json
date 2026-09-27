@@ -1,0 +1,140 @@
+{
+  "_metadata": {
+    "label": "GENERATED_BY_RUNTIME_INTEGRATION",
+    "note": "Actual inference record executed against delivered YOLOv8n checkpoint on sample_input_synthetic.jpg. Not AI-team-delivered ground truth.",
+    "model_name": "MathVision-Kids-Detection",
+    "model_version": "1.0.0",
+    "artifact": "yolov8n_mathvision_det_v1.pt",
+    "sha256": "e78f8fa5a2fc8be581b8624fa510cd2c429c40cdbd0930dbb2f1c2d870338985"
+  },
+  "recognition_result": {
+    "status": "UNCERTAIN_RECOGNITION",
+    "tokens": [
+      {
+        "tokenId": "tok_0_0_8_8aea",
+        "value": "8",
+        "tokenClass": "digit",
+        "boundingBox": [
+          0.5176,
+          0.2239,
+          0.1024,
+          0.1838
+        ],
+        "row": 0,
+        "column": 0,
+        "placeValue": null,
+        "confidence": 0.9742,
+        "alternatives": [],
+        "ambiguity": false
+      },
+      {
+        "tokenId": "tok_0_1_3_4989",
+        "value": "3",
+        "tokenClass": "digit",
+        "boundingBox": [
+          0.4053,
+          0.2317,
+          0.1065,
+          0.1753
+        ],
+        "row": 0,
+        "column": 1,
+        "placeValue": null,
+        "confidence": 0.8791,
+        "alternatives": [],
+        "ambiguity": false
+      },
+      {
+        "tokenId": "tok_1_0_4_64de",
+        "value": "4",
+        "tokenClass": "digit",
+        "boundingBox": [
+          0.414,
+          0.4181,
+          0.0933,
+          0.1551
+        ],
+        "row": 1,
+        "column": 0,
+        "placeValue": null,
+        "confidence": 0.274,
+        "alternatives": [],
+        "ambiguity": true
+      },
+      {
+        "tokenId": "tok_2_0_5_1fbd",
+        "value": "5",
+        "tokenClass": "digit",
+        "boundingBox": [
+          0.5224,
+          0.5965,
+          0.1079,
+          0.1791
+        ],
+        "row": 2,
+        "column": 0,
+        "placeValue": null,
+        "confidence": 0.8848,
+        "alternatives": [],
+        "ambiguity": false
+      },
+      {
+        "tokenId": "tok_2_1_8_3de9",
+        "value": "8",
+        "tokenClass": "digit",
+        "boundingBox": [
+          0.405,
+          0.596,
+          0.1018,
+          0.1839
+        ],
+        "row": 2,
+        "column": 1,
+        "placeValue": null,
+        "confidence": 0.9395,
+        "alternatives": [],
+        "ambiguity": false
+      },
+      {
+        "tokenId": "tok_op_0_6cf7",
+        "value": "+",
+        "tokenClass": "operator",
+        "boundingBox": [
+          0.3118,
+          0.3245,
+          0.095,
+          0.1404
+        ],
+        "row": 0,
+        "column": 99,
+        "placeValue": null,
+        "confidence": 0.3057,
+        "alternatives": [],
+        "ambiguity": true
+      },
+      {
+        "tokenId": "tok_sep_0_aa70",
+        "value": "=",
+        "tokenClass": "separator",
+        "boundingBox": [
+          0.3828,
+          0.5585,
+          0.2429,
+          0.0597
+        ],
+        "row": null,
+        "column": null,
+        "placeValue": null,
+        "confidence": 0.2496,
+        "alternatives": [],
+        "ambiguity": true
+      }
+    ]
+  },
+  "parsed_exercise": {
+    "status": "UNCERTAIN_STRUCTURE",
+    "operationType": "UNKNOWN",
+    "operands": [],
+    "result": ""
+  }
+}

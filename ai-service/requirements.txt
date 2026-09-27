@@ -1,0 +1,25 @@
+# Core API & Runtime
+fastapi==0.141.1
+uvicorn==0.52.4
+pydantic==2.13.5
+pydantic-settings==2.15.0
+httpx==0.28.1
+
+# Task Queue & Broker
+celery==5.6.3
+redis==8.1.0
+
+# Storage
+minio==7.2.20
+pillow==12.3.0
+
+# Machine Learning & Detection Model Runtime (Tested on Python 3.12)
+torch==2.14.0
+torchvision==0.29.0
+ultralytics==8.4.143
+opencv-python==5.0.0.93
+
+# Testing
+pytest==9.1.1
+pytest-asyncio==1.4.0
+pytest-mock==3.15.1

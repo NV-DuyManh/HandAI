@@ -1,0 +1,30 @@
+{
+  "format": "mathvision_det_v1.0",
+  "description": "Label map for MathVision Kids detection model (YOLOv8n). 14 classes: digits 0-9, operators +/-, equals sign, carry marker.",
+  "num_classes": 14,
+  "labels": {
+    "0":  {"id": 0,  "name": "0",  "category": "digit",    "description": "Handwritten digit zero"},
+    "1":  {"id": 1,  "name": "1",  "category": "digit",    "description": "Handwritten digit one"},
+    "2":  {"id": 2,  "name": "2",  "category": "digit",    "description": "Handwritten digit two"},
+    "3":  {"id": 3,  "name": "3",  "category": "digit",    "description": "Handwritten digit three"},
+    "4":  {"id": 4,  "name": "4",  "category": "digit",    "description": "Handwritten digit four"},
+    "5":  {"id": 5,  "name": "5",  "category": "digit",    "description": "Handwritten digit five"},
+    "6":  {"id": 6,  "name": "6",  "category": "digit",    "description": "Handwritten digit six"},
+    "7":  {"id": 7,  "name": "7",  "category": "digit",    "description": "Handwritten digit seven"},
+    "8":  {"id": 8,  "name": "8",  "category": "digit",    "description": "Handwritten digit eight"},
+    "9":  {"id": 9,  "name": "9",  "category": "digit",    "description": "Handwritten digit nine"},
+    "+":  {"id": 10, "name": "+",  "category": "operator",  "description": "Addition operator"},
+    "-":  {"id": 11, "name": "-",  "category": "operator",  "description": "Subtraction operator"},
+    "=":  {"id": 12, "name": "=",  "category": "separator", "description": "Equals sign / horizontal line"},
+    "c1": {"id": 13, "name": "c1", "category": "auxiliary",  "description": "Carry marker (nhớ 1)"}
+  },
+  "class_names_ordered": ["0","1","2","3","4","5","6","7","8","9","+","-","=","c1"],
+  "annotation_format": "YOLO (class_id x_center y_center width height), normalized [0,1]",
+  "version_history": [
+    {
+      "version": "1.0",
+      "date": "2026-08-28",
+      "changes": "Initial 14-class label map for vertical addition/subtraction worksheets"
+    }
+  ]
+}

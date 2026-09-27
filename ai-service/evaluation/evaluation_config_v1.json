@@ -1,0 +1,63 @@
+{
+  "config_version": "1.0.0",
+  "frozen_at": "2026-09-08T20:18:26Z",
+  "runtime_environment": {
+    "python_version": "3.12.13",
+    "torch_version": "2.14.0+cpu",
+    "ultralytics_version": "8.4.143",
+    "os": "Windows 11 (10.0.26200)"
+  },
+  "provenance_checksums": {
+    "modelArtifactSha256": "E78F8FA5A2FC8BE581B8624FA510CD2C429C40CDBD0930DBB2F1C2D870338985",
+    "artifactChecksumDeclaredByManifest": "e78f8fa5a2fc8be581b8624fa510cd2c429c40cdbd0930dbb2f1c2d870338985",
+    "normalizedManifestSha256": "3C1BDE47E72EE01C9DCBD8AD3E8589C6ACC78E7E1B361C3FE78C559027BBC743",
+    "labelMapSha256": "1A820BC5E35E2E2A0B5752CCA152C6EFA82DD3DBEC195ACCAF1839270451B972",
+    "evaluationConfigSha256": "COMPUTED_DYNAMICALLY_FROM_THIS_FILE"
+  },
+  "checksum_semantics_documentation": {
+    "modelArtifactSha256": "SHA-256 binary checksum of yolov8n_mathvision_det_v1.pt (actual model weights)",
+    "artifactChecksumDeclaredByManifest": "Field 'sha256' inside model_manifest.json declaring expected YOLO artifact hash",
+    "normalizedManifestSha256": "SHA-256 file checksum of models/model_manifest.json itself",
+    "labelMapSha256": "SHA-256 file checksum of models/label_map_detection.json",
+    "evaluationConfigSha256": "SHA-256 file checksum of evaluation/evaluation_config_v1.json computed dynamically at runtime"
+  },
+  "model": {
+    "model_name": "MathVision-Kids-Detection",
+    "model_version": "1.0.0",
+    "architecture": "YOLOv8n",
+    "artifact_filename": "yolov8n_mathvision_det_v1.pt",
+    "input_resolution": [640, 640],
+    "input_channels": 3,
+    "preprocessing": "RESIZE_ONLY"
+  },
+  "inference_thresholds": {
+    "confidence_threshold": 0.25,
+    "nms_iou_threshold": 0.50,
+    "ambiguity_threshold": 0.50,
+    "row_tolerance_factor": 0.55,
+    "high_confidence_threshold": 0.85
+  },
+  "parser": {
+    "class": "StructuredParser",
+    "version": "v1.0.0",
+    "supported_operations": ["VERTICAL_ADDITION", "VERTICAL_SUBTRACTION"],
+    "supported_operands_range": "1 to 6 digits",
+    "canonical_rows": {
+      "0": "top_operand",
+      "1": "bottom_operand",
+      "2": "result"
+    },
+    "canonical_columns": "0=units, 1=tens, 2=hundreds, ... (right-to-left)"
+  },
+  "validators": {
+    "addition_validator": "VerticalAdditionValidator v1.0.0 (column-wise carry detection)",
+    "subtraction_validator": "VerticalSubtractionValidator v1.0.0 (column-wise borrow detection)"
+  },
+  "evaluation_scope": {
+    "domain": "Natural numbers vertical arithmetic",
+    "operations": ["VERTICAL_ADDITION", "VERTICAL_SUBTRACTION"],
+    "operand_digits": "1 to 6 digits",
+    "exercises_per_image": 1,
+    "features": ["with_carry", "without_carry", "with_borrow", "without_borrow"]
+  }
+}

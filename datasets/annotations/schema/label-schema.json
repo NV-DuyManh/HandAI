@@ -1,0 +1,41 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "imageId": { "type": "string" },
+    "researchWriterId": { "type": "string" },
+    "datasetVersion": { "type": "string" },
+    "operationType": { "enum": ["VERTICAL_ADDITION", "VERTICAL_SUBTRACTION"] },
+    "tokens": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "boundingBox": {
+            "type": "object",
+            "properties": {
+              "x": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+              "y": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+              "width": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+              "height": { "type": "number", "minimum": 0.0, "maximum": 1.0 }
+            },
+            "required": ["x", "y", "width", "height"]
+          },
+          "tokenClass": { "type": "string" },
+          "transcription": { "type": "string" },
+          "rowIndex": { "type": "integer" },
+          "columnIndex": { "type": "integer" },
+          "placeValue": { "enum": ["UNITS", "TENS", "HUNDREDS", "THOUSANDS", "TEN_THOUSANDS", "HUNDRED_THOUSANDS"] },
+          "semanticRole": { "enum": ["OPERAND_1", "OPERAND_2", "RESULT", "CARRY_BORROW"] },
+          "ambiguous": { "type": "boolean" }
+        },
+        "required": ["boundingBox", "tokenClass"]
+      }
+    },
+    "annotationStatus": { "type": "string" },
+    "annotatorReference": { "type": "string" },
+    "annotationRound": { "type": "integer" },
+    "adjudicated": { "type": "boolean" }
+  },
+  "required": ["imageId", "operationType", "tokens"]
+}

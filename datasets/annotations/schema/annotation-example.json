@@ -1,0 +1,42 @@
+{
+  "imageId": "img_000001",
+  "researchWriterId": "writer_001",
+  "datasetVersion": "v1.0",
+  "operationType": "VERTICAL_ADDITION",
+  "tokens": [
+    {
+      "boundingBox": {
+        "x": 0.4,
+        "y": 0.2,
+        "width": 0.1,
+        "height": 0.1
+      },
+      "tokenClass": "DIGIT_1",
+      "transcription": "1",
+      "rowIndex": 0,
+      "columnIndex": 1,
+      "placeValue": "TENS",
+      "semanticRole": "CARRY_BORROW",
+      "ambiguous": false
+    },
+    {
+      "boundingBox": {
+        "x": 0.5,
+        "y": 0.4,
+        "width": 0.1,
+        "height": 0.1
+      },
+      "tokenClass": "DIGIT_5",
+      "transcription": "5",
+      "rowIndex": 1,
+      "columnIndex": 0,
+      "placeValue": "UNITS",
+      "semanticRole": "OPERAND_1",
+      "ambiguous": true
+    }
+  ],
+  "annotationStatus": "COMPLETE",
+  "annotatorReference": "annotator_1",
+  "annotationRound": 1,
+  "adjudicated": false
+}

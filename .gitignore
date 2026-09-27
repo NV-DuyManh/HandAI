@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+
+# Expo & Mobile
+.expo/
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Gradle & Java
+.gradle/
+build/
+bin/
+*.class
+*.jar
+*.war
+
+# Environment & Local Secrets
+.env.local
+*.log
+
+# IDE
+.idea/
+.vscode/
+*.swp

@@ -1,0 +1,37 @@
+{
+  "_notice": "TEST-ONLY SYNTHETIC MANIFEST FOR PRE-EXECUTION HARNESS SCHEMA GATE VERIFICATION. NOT GOLD EVALUATION EVIDENCE.",
+  "manifest_version": "1.0.0",
+  "created_at": "2026-09-08T20:30:00Z",
+  "dataset_split": "test_harness_smoke",
+  "images": [
+    {
+      "image_id": "synthetic_smoke_001",
+      "filepath": "fixtures/smoke/synthetic_test_dummy.png",
+      "operation": "VERTICAL_ADDITION",
+      "is_supported": true,
+      "ground_truth_expression": {
+        "operand1": "12",
+        "operand2": "34",
+        "operator": "+",
+        "student_result": "46"
+      },
+      "is_mathematically_correct": true,
+      "tokens": [
+        {
+          "image_id": "synthetic_smoke_001",
+          "token_class": "1",
+          "token_bbox": [0.35, 0.20, 0.10, 0.15],
+          "coordinate_convention": "normalized_yolo",
+          "annotation_provenance": "synthetic_smoke_generator"
+        },
+        {
+          "image_id": "synthetic_smoke_001",
+          "token_class": "2",
+          "token_bbox": [0.55, 0.20, 0.10, 0.15],
+          "coordinate_convention": "normalized_yolo",
+          "annotation_provenance": "synthetic_smoke_generator"
+        }
+      ]
+    }
+  ]
+}

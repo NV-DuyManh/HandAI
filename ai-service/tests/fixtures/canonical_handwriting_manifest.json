@@ -1,0 +1,71 @@
+{
+  "version": "prod-4b2r3-canonical-manifest-v1",
+  "fixtures": [
+    {
+      "canonicalId": "OWNER_POEM_BLOCK_1",
+      "relativePath": "ai/runtime/tests/fixtures/real_hw/OWNER_POEM_BLOCK_1.png",
+      "sha256": "a7034f25aeda0fef32ca5cea2b03c3e88e6953225bbef591f9708f6a295da8b9",
+      "width": 768,
+      "height": 418,
+      "expectedLineCount": 4,
+      "description": "Owner handwritten 4-line poem block 1 on lined paper (\"Em yêu mùa hè...\")",
+      "sourceProvenance": "OWNER_PHYSICAL",
+      "status": "AVAILABLE"
+    },
+    {
+      "canonicalId": "OWNER_POEM_8_LINES",
+      "relativePath": "ai/runtime/tests/fixtures/ocr_eval/OWNER_POEM_8_LINES.png",
+      "sha256": "d67c1953de1e0d17e32b545aaf42f741265a397877fb21e3c7d1beb125a3e13b",
+      "width": 800,
+      "height": 750,
+      "expectedLineCount": 8,
+      "description": "Authoritative 8-line poem capture on ruled notebook page (\"Em yêu mùa hè... Thong thả dắt trâu...\")",
+      "sourceProvenance": "OWNER_PHYSICAL",
+      "status": "AVAILABLE"
+    },
+    {
+      "canonicalId": "WIDE_NOTEBOOK_SAMPLE",
+      "relativePath": "ai/runtime/tests/fixtures/ocr_eval/WIDE_NOTEBOOK_SAMPLE.png",
+      "sha256": "39465cb4bbbdfb628744fc37f80627408de240044751feed5008c8a3ed415726",
+      "width": 1187,
+      "height": 1947,
+      "expectedLineCount": 9,
+      "description": "Tall high-resolution notebook page with 9 lines of Vietnamese handwriting",
+      "sourceProvenance": "STUDENT_WORKBOOK_SCAN",
+      "status": "AVAILABLE"
+    },
+    {
+      "canonicalId": "REAL_HW_01",
+      "relativePath": "ai/runtime/tests/fixtures/real_hw/REAL-HW-01.jpg",
+      "sha256": "eb0541e6c8e3914227fad478df4dbbfb595a1e06681cc23ae0b542c91b3ace61",
+      "width": 1024,
+      "height": 236,
+      "expectedLineCount": 4,
+      "description": "Notebook crop with horizontal ruling lines and dark contrast bands",
+      "sourceProvenance": "HISTORICAL_REGRESSION_COLLECTION",
+      "status": "AVAILABLE"
+    },
+    {
+      "canonicalId": "REAL_HW_02",
+      "relativePath": "ai/runtime/tests/fixtures/real_hw/REAL-HW-02.jpg",
+      "sha256": "e76067324c2bf4b97bf4f6f151289e50514c9210aa52ae7b64d5820a710cae15",
+      "width": 451,
+      "height": 1024,
+      "expectedLineCount": 3,
+      "description": "Mobile camera screenshot capturing privacy screen overlay dialog and UI text chrome",
+      "sourceProvenance": "MOBILE_APP_SCREENSHOT",
+      "status": "AVAILABLE"
+    },
+    {
+      "canonicalId": "REAL_HW_03",
+      "relativePath": "ai/runtime/tests/fixtures/real_hw/REAL-HW-03.jpg",
+      "sha256": "9d4cb2a1aa7daa7ce549b0851ee1b2da423b508510e080ccd9ceaa40f91de673",
+      "width": 451,
+      "height": 1024,
+      "expectedLineCount": 2,
+      "description": "Mobile screenshot of line editor screen (\"Chỉnh sửa khung các dòng chữ... Đã tìm thấy 1 dòng chữ...\")",
+      "sourceProvenance": "MOBILE_APP_SCREENSHOT_LINE_EDITOR",
+      "status": "AVAILABLE"
+    }
+  ]
+}

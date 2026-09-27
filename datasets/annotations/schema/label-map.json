@@ -1,0 +1,21 @@
+{
+  "version": "1.0",
+  "classes": [
+    "DIGIT_0",
+    "DIGIT_1",
+    "DIGIT_2",
+    "DIGIT_3",
+    "DIGIT_4",
+    "DIGIT_5",
+    "DIGIT_6",
+    "DIGIT_7",
+    "DIGIT_8",
+    "DIGIT_9",
+    "OPERATOR_PLUS",
+    "OPERATOR_MINUS",
+    "CARRY_MARK",
+    "BORROW_MARK",
+    "OTHER_SUPPORTED_MARK"
+  ],
+  "note": "Conservative initial recognition vocabulary for MVP."
+}

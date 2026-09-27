@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>MathVision Kids - Annotation UI</title>
+    <style>
+        body { font-family: sans-serif; background: #f4f4f9; padding: 20px; }
+        .container { max-width: 800px; margin: 0 auto; background: #fff; padding: 20px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        .crop-img { max-width: 100%; height: auto; border: 1px solid #ccc; margin-bottom: 10px; }
+        .info { color: #666; font-size: 14px; margin-bottom: 20px; }
+        .prelabel { background: #eef; padding: 10px; font-family: monospace; font-size: 18px; border-left: 4px solid #66f; margin-bottom: 20px; }
+        input[type="text"] { width: 100%; padding: 10px; font-size: 18px; margin-bottom: 20px; box-sizing: border-box; }
+        button { padding: 10px 20px; font-size: 16px; cursor: pointer; margin-right: 10px; border: none; border-radius: 4px; margin-bottom: 10px;}
+        .btn-accept { background: #4caf50; color: white; }
+        .btn-reject { background: #f44336; color: white; }
+        .btn-math { background: #ff9800; color: white; }
+        .btn-nav { background: #2196f3; color: white; }
+        .status { margin-top: 20px; font-weight: bold; }
+        .controls { margin-bottom: 20px; border-bottom: 1px solid #ccc; padding-bottom: 10px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>Local Annotation Tool</h2>
+        
+        <div class="controls">
+            <input type="file" id="fileInput" accept=".json" style="margin-bottom: 10px;" />
+            <br/>
+            <button class="btn-nav" id="btnExport">Export Review State (JSON)</button>
+            <button class="btn-nav" id="btnClear" style="background:#777;">Clear LocalStorage</button>
+            <p class="info" id="globalProgress">Progress: 0 / 0 | Verified: 0 | Rejected: 0</p>
+        </div>
+        
+        <div id="editor" style="display: none;">
+            <h3 id="lineId"></h3>
+            <p id="category" class="info"></p>
+            <div id="imgError" style="display:none; color:red; margin-bottom: 10px; font-weight:bold;">
+                Image load failed! <br/>
+                Raw Path: <span id="rawPath"></span><br/>
+                Resolved URL: <span id="resolvedUrl"></span>
+            </div>
+            <img id="cropImg" class="crop-img" src="" alt="crop image" onerror="handleImgError()"/>
+            
+            <p><strong>Pre-label (Suggestion):</strong></p>
+            <div id="prelabel" class="prelabel"></div>
+            
+            <p><strong>Verified Text:</strong></p>
+            <input type="text" id="verifiedText" />
+            
+            <div>
+                <button class="btn-accept" id="btnAccept">Accept / Save Edit (Ctrl+Enter)</button>
+                <button class="btn-reject" id="btnReject">Reject (Ctrl+Del)</button>
+                <button class="btn-math" id="btnMath">Flag Math (Ctrl+M)</button>
+            </div>
+            <div style="margin-top: 10px;">
+                <button class="btn-nav" id="btnPrev">Prev (Alt+Left)</button>
+                <button class="btn-nav" id="btnNext">Next (Alt+Right)</button>
+            </div>
+            
+            <p class="status" id="statusText"></p>
+        </div>
+    </div>
+
+    <script>
+        let batchData = [];
+        let currentIndex = 0;
+        let masterState = {};
+        let currentBatchFileName = "";
+        
+        // Canonical Path Resolver
+        function resolveCropUrl(cropPath, batchFileName) {
+            if (!cropPath) return "";
+            let p = cropPath.replace(/\\/g, '/');
+            
+            // 3. Windows path -> strip repo prefix
+            const prefixMatch = p.match(/^[A-Z]:\/.*?MathVisionKid\/(.*)/i);
+            if (prefixMatch) {
+                p = prefixMatch[1];
+            }
+            
+            // 1 & 2. Repo-root relative or Leading slash
+            if (p.startsWith('data/')) {
+                return '/' + p;
+            }
+            if (p.startsWith('/')) {
+                return p;
+            }
+            
+            // 4. Batch-relative if it starts with 'crops/'
+            if (p.startsWith('crops/')) {
+                if (batchFileName) {
+                    const batchId = batchFileName.replace('.json', '');
+                    return `annotation_batches/${batchId}/${p}`;
+                }
+            }
+            
+            // Default tool-relative (e.g. work/crops/...)
+            return p;
+        }
+
+        function handleImgError() {
+            document.getElementById('cropImg').style.display = 'none';
+            document.getElementById('imgError').style.display = 'block';
+        }
+
+        // Load state from local storage on boot
+        try {
+            const saved = localStorage.getItem('hwtext_annotation_state');
+            if (saved) masterState = JSON.parse(saved);
+        } catch(e) { console.error("LocalStorage load failed", e); }
+
+        function updateGlobalProgress() {
+            if (!batchData.length) return;
+            let ver = 0; let rej = 0;
+            batchData.forEach(item => {
+                if (masterState[item.line_id]) {
+                    const st = masterState[item.line_id].label_status;
+                    if (st === 'VERIFIED') ver++;
+                    if (st === 'REJECTED') rej++;
+                }
+            });
+            document.getElementById('globalProgress').innerText = `Batch Progress: ${ver+rej} / ${batchData.length} | Verified: ${ver} | Rejected: ${rej}`;
+        }
+
+        document.getElementById('fileInput').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            currentBatchFileName = file.name;
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const imported = JSON.parse(e.target.result);
+                    if (Array.isArray(imported)) {
+                        batchData = imported;
+                    } else if (imported.type === "export") {
+                        batchData = imported.data;
+                        imported.data.forEach(it => {
+                            if (it.label_status !== 'UNVERIFIED') {
+                                masterState[it.line_id] = it;
+                            }
+                        });
+                        saveToLocal();
+                    }
+                    currentIndex = 0;
+                    document.getElementById('editor').style.display = 'block';
+                    renderCurrent();
+                } catch(err) {
+                    alert("Error parsing JSON!");
+                }
+            };
+            reader.readAsText(file);
+        });
+        
+        function saveToLocal() {
+            localStorage.setItem('hwtext_annotation_state', JSON.stringify(masterState));
+            updateGlobalProgress();
+        }
+
+        function renderCurrent() {
+            if (currentIndex < 0) currentIndex = 0;
+            if (currentIndex >= batchData.length) currentIndex = batchData.length - 1;
+            if (batchData.length === 0) return;
+            
+            const item = batchData[currentIndex];
+            const currentItemState = masterState[item.line_id] || item;
+            
+            document.getElementById('lineId').innerText = `Item ${currentIndex+1} / ${batchData.length} — ${item.line_id}`;
+            document.getElementById('category').innerText = `Category: ${item.provisional_class} | Score: ${parseFloat(item.quality_score || 0).toFixed(1)}`;
+            
+            document.getElementById('imgError').style.display = 'none';
+            document.getElementById('cropImg').style.display = 'block';
+            
+            const resolvedUrl = resolveCropUrl(item.crop_path, currentBatchFileName);
+            document.getElementById('rawPath').innerText = item.crop_path;
+            document.getElementById('resolvedUrl').innerText = resolvedUrl;
+            document.getElementById('cropImg').src = resolvedUrl;
+            
+            document.getElementById('prelabel').innerText = item.raw_prelabel || "(empty)";
+            document.getElementById('verifiedText').value = currentItemState.verified_text || item.raw_prelabel || "";
+            document.getElementById('verifiedText').focus();
+            
+            const st = currentItemState.label_status || "UNVERIFIED";
+            const statusColor = st === 'VERIFIED' ? 'green' : (st === 'REJECTED' ? 'red' : 'black');
+            let notes = currentItemState.review_notes ? ` | Notes: ${currentItemState.review_notes}` : "";
+            document.getElementById('statusText').innerHTML = `Current Status: <span style="color:${statusColor}">${st}</span>${notes}`;
+            
+            updateGlobalProgress();
+        }
+        
+        function saveCurrent(status, notes="") {
+            if (batchData.length === 0) return;
+            const item = batchData[currentIndex];
+            
+            let vtext = document.getElementById('verifiedText').value;
+            // Normalization
+            vtext = vtext.trim().normalize("NFC");
+            
+            masterState[item.line_id] = {
+                ...item,
+                verified_text: status === 'REJECTED' ? '' : vtext,
+                label_status: status,
+                review_notes: notes,
+                reviewed_at: new Date().toISOString()
+            };
+            saveToLocal();
+            
+            // Advance
+            if (currentIndex < batchData.length - 1) {
+                currentIndex++;
+                renderCurrent();
+            } else {
+                renderCurrent();
+                document.getElementById('statusText').innerHTML += "<br/><b>Batch Complete! Please Export.</b>";
+            }
+        }
+        
+        document.getElementById('btnAccept').addEventListener('click', () => saveCurrent('VERIFIED'));
+        document.getElementById('btnReject').addEventListener('click', () => saveCurrent('REJECTED'));
+        document.getElementById('btnMath').addEventListener('click', () => saveCurrent('REJECTED', 'MATH_DOMINANT_MISCLASSIFIED'));
+        
+        document.getElementById('btnPrev').addEventListener('click', () => {
+            if (currentIndex > 0) { currentIndex--; renderCurrent(); }
+        });
+        document.getElementById('btnNext').addEventListener('click', () => {
+            if (currentIndex < batchData.length - 1) { currentIndex++; renderCurrent(); }
+        });
+        
+        document.getElementById('btnClear').addEventListener('click', () => {
+            if (confirm("Are you sure you want to clear local storage? Unexported progress will be lost!")) {
+                localStorage.removeItem('hwtext_annotation_state');
+                masterState = {};
+                renderCurrent();
+            }
+        });
+        
+        document.getElementById('btnExport').addEventListener('click', () => {
+            if (batchData.length === 0) return;
+            const exportData = batchData.map(item => masterState[item.line_id] || item);
+            const wrapper = {
+                type: "export",
+                timestamp: new Date().toISOString(),
+                data: exportData
+            };
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(wrapper, null, 2));
+            const dlAnchorElem = document.createElement('a');
+            dlAnchorElem.setAttribute("href", dataStr);
+            dlAnchorElem.setAttribute("download", `review_export_${new Date().getTime()}.json`);
+            dlAnchorElem.click();
+        });
+        
+        window.addEventListener('keydown', (e) => {
+            if (document.getElementById('editor').style.display === 'none') return;
+            
+            // Ctrl+Enter = Accept/Save Edit
+            if (e.key === 'Enter' && e.ctrlKey) {
+                e.preventDefault();
+                document.getElementById('btnAccept').click();
+            }
+            // Ctrl+Del = Reject
+            if (e.key === 'Delete' && e.ctrlKey) {
+                e.preventDefault();
+                document.getElementById('btnReject').click();
+            }
+            // Ctrl+M = Math Flag
+            if (e.key === 'm' && e.ctrlKey) {
+                e.preventDefault();
+                document.getElementById('btnMath').click();
+            }
+            // Alt+Left = Prev
+            if (e.key === 'ArrowLeft' && e.altKey) {
+                e.preventDefault();
+                document.getElementById('btnPrev').click();
+            }
+            // Alt+Right = Next
+            if (e.key === 'ArrowRight' && e.altKey) {
+                e.preventDefault();
+                document.getElementById('btnNext').click();
+            }
+        });
+    </script>
+</body>
+</html>
