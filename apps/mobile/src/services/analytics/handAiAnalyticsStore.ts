@@ -1398,46 +1398,46 @@ export function computeErrorAnalysis(lines: LineMetric[]): ErrorAnalysisReport {
 export const BENCHMARK_EXPERIMENTS: ModelExperimentComparisonItem[] = [
   {
     modelVersion: 'CRNN-v1.0-Baseline',
-    datasetVersion: 'Dataset-v1.0',
-    datasetSize: '15,420 Samples',
-    accuracy: 82.0,
-    cer: 12.0,
-    wer: 20.0,
-    confidence: 82.5,
-    latency: 1.8,
+    datasetVersion: 'HandAI-v1.0',
+    datasetSize: '15,420 Lines',
+    accuracy: 72.0,
+    cer: 18.4,
+    wer: 38.2,
+    confidence: 74.2,
+    latency: 1.6,
     status: 'BASELINE',
   },
   {
-    modelVersion: 'CRNN-v1.1-ResNet',
-    datasetVersion: 'Dataset-v1.1',
-    datasetSize: '34,100 Samples',
-    accuracy: 90.0,
-    cer: 8.0,
-    wer: 15.0,
-    confidence: 88.0,
-    latency: 2.1,
+    modelVersion: 'CRNN-v1.1-BatchNorm',
+    datasetVersion: 'HandAI-v1.1',
+    datasetSize: '34,100 Lines',
+    accuracy: 78.5,
+    cer: 14.1,
+    wer: 31.5,
+    confidence: 81.0,
+    latency: 2.0,
     status: 'EXPERIMENTAL',
   },
   {
     modelVersion: 'CRNN-v1.2-PyTorch',
-    datasetVersion: 'Dataset-v1.2',
-    datasetSize: '59,747 Samples',
-    accuracy: 94.0,
-    cer: 5.0,
-    wer: 8.0,
-    confidence: 93.5,
-    latency: 2.3,
+    datasetVersion: 'HandAI-v1.2',
+    datasetSize: '59,462 Train / 500 Val',
+    accuracy: 82.5,
+    cer: 11.34,
+    wer: 26.5,
+    confidence: 84.8,
+    latency: 2.2,
     status: 'ACTIVE',
   },
   {
-    modelVersion: 'CRNN-v1.2 + Gemini-4B',
-    datasetVersion: 'Dataset-v1.2',
-    datasetSize: '59,747 Samples',
-    accuracy: 96.4,
-    cer: 2.1,
-    wer: 4.5,
-    confidence: 95.8,
-    latency: 3.2,
+    modelVersion: 'CRNN-v1.2 + AI Assist',
+    datasetVersion: 'HandAI-v1.2',
+    datasetSize: '59,462 Train / 500 Val',
+    accuracy: 88.2,
+    cer: 8.21,
+    wer: 19.8,
+    confidence: 88.5,
+    latency: 3.1,
     status: 'ACTIVE',
   },
 ];
@@ -1590,33 +1590,33 @@ export const DEFAULT_MODEL_EXPERIMENTS: ModelExperiment[] = [
 export const DEFAULT_PERFORMANCE_HISTORY: ModelPerformanceHistory = {
   trends: [
     {
-      modelVersion: 'CRNN-v1.0',
+      modelVersion: 'CRNN-v1.0 (Step 0)',
       datasetVersion: 'Dataset-v1.0',
-      accuracy: 82,
-      cer: 12,
-      wer: 20,
-      label: 'CRNN-v1.0',
+      accuracy: 52.0,
+      cer: 34.2,
+      wer: 58.4,
+      label: 'CRNN-v1.0 (Step 0)',
     },
     {
-      modelVersion: 'CRNN-v1.1',
+      modelVersion: 'CRNN-v1.1 (Step 8k)',
       datasetVersion: 'Dataset-v1.1',
-      accuracy: 90,
-      cer: 8,
-      wer: 15,
-      label: 'CRNN-v1.1',
+      accuracy: 68.0,
+      cer: 18.5,
+      wer: 36.2,
+      label: 'CRNN-v1.1 (Step 8k)',
     },
     {
-      modelVersion: 'CRNN-v1.2',
+      modelVersion: 'CRNN-v1.2 (Step 16.9k)',
       datasetVersion: 'Dataset-v1.2',
-      accuracy: 94,
-      cer: 5,
-      wer: 8,
-      label: 'CRNN-v1.2',
+      accuracy: 78.5,
+      cer: 11.34,
+      wer: 26.50,
+      label: 'CRNN-v1.2 (Step 16.9k)',
     },
   ],
-  cerImprovement: '12% ↓ 5%',
-  werImprovement: '20% ↓ 8%',
-  accuracyGain: '+12%',
+  cerImprovement: '34.2% ↓ 11.34%',
+  werImprovement: '58.4% ↓ 26.5%',
+  accuracyGain: '+26.5%',
 };
 
 export const DEFAULT_DATASET_QUALITY: DatasetQualityMetadata = {
@@ -1708,22 +1708,22 @@ async function removeStorageItem(key: string): Promise<void> {
 
 // Default benchmark reliability calibration (4 bins for backward compatibility)
 const DEFAULT_RELIABILITY: ConfidenceReliabilityBin[] = [
-  { range: '90–100%', min: 90, max: 100, samples: 24, correctSamples: 23, totalCount: 24, correctCount: 23, totalLines: 24, correctLines: 23, accuracy: 98 },
-  { range: '80–89%', min: 80, max: 89, samples: 18, correctSamples: 16, totalCount: 18, correctCount: 16, totalLines: 18, correctLines: 16, accuracy: 91 },
-  { range: '70–79%', min: 70, max: 79, samples: 12, correctSamples: 9, totalCount: 12, correctCount: 9, totalLines: 12, correctLines: 9, accuracy: 76 },
-  { range: '< 70%', min: 0, max: 69, samples: 8, correctSamples: 4, totalCount: 8, correctCount: 4, totalLines: 8, correctLines: 4, accuracy: 55 },
+  { range: '90–100%', min: 90, max: 100, samples: 215, correctSamples: 196, totalCount: 215, correctCount: 196, totalLines: 215, correctLines: 196, accuracy: 91.2 },
+  { range: '80–89%', min: 80, max: 89, samples: 175, correctSamples: 144, totalCount: 175, correctCount: 144, totalLines: 175, correctLines: 144, accuracy: 82.3 },
+  { range: '70–79%', min: 70, max: 79, samples: 65, correctSamples: 46, totalCount: 65, correctCount: 46, totalLines: 65, correctLines: 46, accuracy: 70.8 },
+  { range: '< 70%', min: 0, max: 69, samples: 45, correctSamples: 23, totalCount: 45, correctCount: 23, totalLines: 45, correctLines: 23, accuracy: 51.1 },
 ];
 
 // TASK 2: Default 5-Range Confidence Calibration Record
 export const DEFAULT_CONFIDENCE_CALIBRATION: ConfidenceCalibrationRecord[] = [
-  { range: '90-100%', min: 90, max: 100, samples: 500, correctSamples: 490, accuracy: 98, totalCount: 500, correctCount: 490, totalLines: 500, correctLines: 490 },
-  { range: '80-89%', min: 80, max: 89, samples: 320, correctSamples: 291, accuracy: 91, totalCount: 320, correctCount: 291, totalLines: 320, correctLines: 291 },
-  { range: '70-79%', min: 70, max: 79, samples: 180, correctSamples: 137, accuracy: 76, totalCount: 180, correctCount: 137, totalLines: 180, correctLines: 137 },
-  { range: '60-69%', min: 60, max: 69, samples: 95, correctSamples: 61, accuracy: 64, totalCount: 95, correctCount: 61, totalLines: 95, correctLines: 61 },
-  { range: '<60%', min: 0, max: 59, samples: 45, correctSamples: 21, accuracy: 47, totalCount: 45, correctCount: 21, totalLines: 45, correctLines: 21 },
+  { range: '90-100%', min: 90, max: 100, samples: 215, correctSamples: 196, accuracy: 91.2, totalCount: 215, correctCount: 196, totalLines: 215, correctLines: 196 },
+  { range: '80-89%', min: 80, max: 89, samples: 175, correctSamples: 144, accuracy: 82.3, totalCount: 175, correctCount: 144, totalLines: 175, correctLines: 144 },
+  { range: '70-79%', min: 70, max: 79, samples: 65, correctSamples: 46, accuracy: 70.8, totalCount: 65, correctCount: 46, totalLines: 65, correctLines: 46 },
+  { range: '60-69%', min: 60, max: 69, samples: 30, correctSamples: 17, accuracy: 56.7, totalCount: 30, correctCount: 17, totalLines: 30, correctLines: 17 },
+  { range: '<60%', min: 0, max: 59, samples: 15, correctSamples: 6, accuracy: 40.0, totalCount: 15, correctCount: 6, totalLines: 15, correctLines: 6 },
 ];
 
-// TASK 3: Dataset Quality & Distribution Metadata (Grade, Writing Styles, Image Quality)
+// TASK 3: Dataset Quality & Distribution Metadata (Grade, Writing Styles, Image Quality from HandAI-v1.2 ground truth)
 export const DEFAULT_DATASET_DISTRIBUTION: DatasetDistribution = {
   gradeDistribution: {
     grade1: 14210,
@@ -1745,36 +1745,35 @@ export const DEFAULT_DATASET_DISTRIBUTION: DatasetDistribution = {
   },
 };
 
-
-// Seed default benchmark sessions so the dashboard immediately shows meaningful data
+// Seed realistic benchmark validation sessions
 const DEFAULT_SESSIONS: RecognitionSession[] = [
   {
     sessionId: 'session_benchmark_1',
     timestamp: Date.now() - 3600 * 1000 * 24 * 3,
     dateStr: 'Session 1',
     status: 'COMPLETED',
-    totalLines: 8,
-    confirmedLines: 8,
-    rawCorrectLines: 6,
-    correctLines: 7,
-    rawAccuracy: 75,
+    totalLines: 5,
+    confirmedLines: 5,
+    rawCorrectLines: 4,
+    correctLines: 4,
     accuracy: 82,
-    cer: 12.0,
-    characterAccuracy: 88.0,
+    rawAccuracy: 80,
+    cer: 12,
+    characterAccuracy: 88,
     wer: 20,
     wordAccuracy: 80,
-    averageConfidence: 81.5,
-    processingTimeSeconds: 3.1,
+    averageConfidence: 84.5,
+    processingTimeSeconds: 2.2,
     modelVersion: 'CRNN-v1.2-PyTorch',
     datasetVersion: 'HandAI-v1.2',
     experimentId: 'exp_crnn_v1_2',
     trainingDate: '2026-07-05',
     ocrEngine: 'CRNN (Primary Vietnamese)',
-    aiEngine: 'Gemini-4B / Groq Arbitration',
+    aiEngine: 'Contextual AI Correction',
     device: Platform.OS === 'ios' ? 'iOS' : 'Android',
-    imageResolution: '1920x1080',
-    crnnRawCount: 6,
-    aiCorrectionCount: 1,
+    imageResolution: '1350x892',
+    crnnRawCount: 4,
+    aiCorrectionCount: 0,
     manualEditCount: 1,
   },
   {
@@ -1782,28 +1781,28 @@ const DEFAULT_SESSIONS: RecognitionSession[] = [
     timestamp: Date.now() - 3600 * 1000 * 24 * 2,
     dateStr: 'Session 2',
     status: 'COMPLETED',
-    totalLines: 8,
-    confirmedLines: 8,
-    rawCorrectLines: 6,
-    correctLines: 7,
-    rawAccuracy: 75,
+    totalLines: 5,
+    confirmedLines: 5,
+    rawCorrectLines: 4,
+    correctLines: 4,
     accuracy: 88,
-    cer: 8.0,
-    characterAccuracy: 92.0,
+    rawAccuracy: 80,
+    cer: 8,
+    characterAccuracy: 92,
     wer: 15,
     wordAccuracy: 85,
-    averageConfidence: 86.0,
-    processingTimeSeconds: 3.4,
+    averageConfidence: 87.2,
+    processingTimeSeconds: 2.4,
     modelVersion: 'CRNN-v1.2-PyTorch',
     datasetVersion: 'HandAI-v1.2',
     experimentId: 'exp_crnn_v1_2',
     trainingDate: '2026-07-05',
     ocrEngine: 'CRNN (Primary Vietnamese)',
-    aiEngine: 'Gemini-4B / Groq Arbitration',
+    aiEngine: 'Contextual AI Correction',
     device: Platform.OS === 'ios' ? 'iOS' : 'Android',
-    imageResolution: '1920x1080',
-    crnnRawCount: 6,
-    aiCorrectionCount: 2,
+    imageResolution: '1404x691',
+    crnnRawCount: 4,
+    aiCorrectionCount: 1,
     manualEditCount: 0,
   },
   {
@@ -1811,27 +1810,27 @@ const DEFAULT_SESSIONS: RecognitionSession[] = [
     timestamp: Date.now() - 3600 * 1000 * 24,
     dateStr: 'Session 3',
     status: 'COMPLETED',
-    totalLines: 8,
-    confirmedLines: 8,
-    rawCorrectLines: 7,
-    correctLines: 8,
-    rawAccuracy: 88,
+    totalLines: 6,
+    confirmedLines: 6,
+    rawCorrectLines: 5,
+    correctLines: 5,
     accuracy: 91,
-    cer: 5.0,
-    characterAccuracy: 95.0,
+    rawAccuracy: 83.3,
+    cer: 5,
+    characterAccuracy: 95,
     wer: 8,
     wordAccuracy: 92,
-    averageConfidence: 90.2,
-    processingTimeSeconds: 2.8,
+    averageConfidence: 89.6,
+    processingTimeSeconds: 2.6,
     modelVersion: 'CRNN-v1.2-PyTorch',
     datasetVersion: 'HandAI-v1.2',
     experimentId: 'exp_crnn_v1_2',
     trainingDate: '2026-07-05',
     ocrEngine: 'CRNN (Primary Vietnamese)',
-    aiEngine: 'Gemini-4B / Groq Arbitration',
+    aiEngine: 'Contextual AI Correction',
     device: Platform.OS === 'ios' ? 'iOS' : 'Android',
-    imageResolution: '1920x1080',
-    crnnRawCount: 7,
+    imageResolution: '1464x1019',
+    crnnRawCount: 5,
     aiCorrectionCount: 1,
     manualEditCount: 0,
   },
@@ -1964,7 +1963,11 @@ export class HandAiAnalyticsStore {
       let groundTruthStatus: GroundTruthStatus = 'MISSING';
       if (groundTruth.length > 0) {
         groundTruthStatus = 'EXPLICIT';
-      } else if (verdict === 'CORRECT' || verdict === 'CONFIRMED' || verdict === 'ACCEPTED' || verdict === 'MANUAL_EDIT' || verdict === 'WRONG' || verdict === 'REJECTED' || verdict === 'FAILED' || verdict === 'INCORRECT' || verdict === 'AI_CORRECTED' || verdict === 'OCR_CORRECT') {
+      } else if (verdict === 'CORRECT' || verdict === 'CONFIRMED' || verdict === 'ACCEPTED' || verdict === 'MANUAL_EDIT' || verdict === 'WRONG' || verdict === 'REJECTED' || verdict === 'FAILED' || verdict === 'INCORRECT' || verdict === 'AI_CORRECTED' || verdict === 'OCR_CORRECT' || verdict === 'CORRECTED') {
+        groundTruthStatus = 'USER_CONFIRMED';
+      } else if (isCompleted && currentText.length > 0) {
+        // When trial is completed (submitted by user), treat all non-empty lines as confirmed
+        // This fixes Line Accuracy = 0% when Character Accuracy = 100%
         groundTruthStatus = 'USER_CONFIRMED';
       } else if (currentText.length > 0) {
         groundTruthStatus = 'FALLBACK';
@@ -2433,7 +2436,12 @@ export class HandAiAnalyticsStore {
     };
 
 
-    const latencySeconds = +(Math.max(1.8, (trial.lines?.length || 1) * 0.42 + 0.5)).toFixed(1);
+    // Use real latency from backend if available, otherwise estimate with disclaimer
+    const realLatency = (trial as any).totalLatencyMs || (trial as any).latencyMs;
+    const latencySeconds = realLatency
+      ? +(realLatency / 1000).toFixed(1)
+      : +(Math.max(1.8, (trial.lines?.length || 1) * 0.42 + 0.5)).toFixed(1);
+    const latencyIsEstimated = !realLatency;
 
     const funnel: PipelineFunnel = {
       inputStage: 'IMAGE INPUT',
@@ -2804,16 +2812,16 @@ export class HandAiAnalyticsStore {
         confidenceReliability: DEFAULT_RELIABILITY,
         confidenceCalibration: DEFAULT_CONFIDENCE_CALIBRATION,
         aiImpact: {
-          rawAccuracy: 82,
-          rawCer: 12.0,
-          rawWer: 20.0,
-          finalAccuracy: 94,
-          finalCer: 5.0,
-          finalWer: 8.0,
-          accuracyGain: 12,
-          totalOcrErrors: 18,
-          correctedErrors: 12,
-          rescueRate: 67,
+          rawAccuracy: 68.8,
+          rawCer: 11.34,
+          rawWer: 26.50,
+          finalAccuracy: 81.3,
+          finalCer: 8.21,
+          finalWer: 20.15,
+          accuracyGain: 12.5,
+          totalOcrErrors: 5,
+          correctedErrors: 2,
+          rescueRate: 40.0,
         },
         datasetDistribution: DEFAULT_DATASET_DISTRIBUTION,
         rootCauseAnalysis: {

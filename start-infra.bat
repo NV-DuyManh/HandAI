@@ -3,14 +3,19 @@ setlocal
 title HandAI - Docker Infrastructure
 cd /d "%~dp0"
 
-echo ============================================================
-echo   HandAI -- Infrastructure (PostgreSQL, MinIO, Redis)
-echo ============================================================
-echo.
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0infra\start-infra.ps1"
+set EXIT_CODE=%ERRORLEVEL%
 
-docker compose -f infra\docker-compose.yml up -d
-docker compose -f infra\docker-compose.yml ps
+if %EXIT_CODE% neq 0 (
+    echo.
+    echo [ERROR] Infrastructure startup failed with error code %EXIT_CODE%.
+    if "%~1"=="" pause
+    exit /b %EXIT_CODE%
+)
 
-echo.
-echo Infrastructure containers started.
-pause
+if "%~1"=="" (
+    echo.
+    echo Press any key to exit...
+    pause >nul
+)
+exit /b 0

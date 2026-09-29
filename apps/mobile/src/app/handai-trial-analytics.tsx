@@ -5,13 +5,13 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  SafeAreaView,
   ActivityIndicator,
   Share,
   Alert,
   Modal,
   Platform,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { AppHeader } from '../components/ui/AppHeader';
@@ -677,11 +677,16 @@ export default function HandAiTrialAnalyticsScreen() {
         <View style={styles.sectionCard}>
           <View style={styles.sectionHeader}>
             <Ionicons name="flask-outline" size={18} color={PRIMARY_COLOR} />
-            <Text style={styles.sectionTitle}>Model Experiment Benchmark Tracking</Text>
+            <Text style={styles.sectionTitle}>Historical Model Benchmark</Text>
           </View>
           <Text style={styles.sectionSubtitle}>
             Cross-experiment validation comparing model iterations, accuracy, CER, and latency
           </Text>
+          <View style={{ backgroundColor: '#FEF3C7', borderRadius: 6, padding: 8, marginTop: 4, marginBottom: 8 }}>
+            <Text style={{ fontSize: 10, color: '#92400E', fontWeight: '500' }}>
+              ⚠ Not generated from current image. These are historical training benchmark results.
+            </Text>
+          </View>
 
           <View style={styles.tableWrapper}>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>

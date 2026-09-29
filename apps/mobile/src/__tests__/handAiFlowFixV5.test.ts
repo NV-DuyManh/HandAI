@@ -24,7 +24,7 @@ describe('HandAI Flow Fix V5 - Image Pipeline & Auth Isolation', () => {
         sourceImageUri: originalUri,
         privacyImageUri: privacyScreenshotUri,
         isMasked: true,
-      });
+      } as any);
 
       const draft = submissionDraftStore.getDraft();
 
@@ -48,7 +48,7 @@ describe('HandAI Flow Fix V5 - Image Pipeline & Auth Isolation', () => {
         sourceImageUri: originalUri,
         privacyImageUri: privacyUri,
         isMasked: true,
-      });
+      } as any);
 
       const draft = submissionDraftStore.getDraft();
 

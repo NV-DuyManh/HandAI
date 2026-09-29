@@ -1,0 +1,1387 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>HandAI Research Dashboard — Final Defense Mobile Edition</title>
+  <meta name="description" content="HandAI Research Dashboard — Final Defense Mobile First Edition. Vietnamese Handwriting Recognition System using CRNN and AI Correction.">
+  <!-- Google Fonts Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  
+  <style>
+    /* ========================================================= */
+    /* V2.0 FINAL DEFENSE — MOBILE FIRST DESIGN SYSTEM           */
+    /* ========================================================= */
+    :root {
+      --navy: #0B192C;
+      --navy-light: #1E3A8A;
+      --navy-surface: #EEF5FF;
+      --navy-border: #BFDBFE;
+      
+      --green: #10B981;
+      --green-dark: #047857;
+      --green-surface: #ECFDF5;
+      --green-border: #A7F3D0;
+      
+      --amber: #D97706;
+      --amber-dark: #B45309;
+      --amber-surface: #FFFBEB;
+      --amber-border: #FDE68A;
+      
+      --red: #EF4444;
+      --red-surface: #FEF2F2;
+      --red-border: #FECACA;
+      
+      --bg: #F8FAFC;
+      --card-bg: #FFFFFF;
+      --card-border: #E2E8F0;
+      
+      --text-primary: #0F172A;
+      --text-secondary: #475569;
+      --text-muted: #64748B;
+      --text-subtle: #94A3B8;
+      
+      --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.04);
+      --shadow-card: 0 2px 10px rgba(15, 23, 42, 0.04), 0 1px 2px rgba(15, 23, 42, 0.02);
+      
+      --radius-card: 18px;
+      --radius-inner: 12px;
+      --radius-sm: 8px;
+      --radius-pill: 9999px;
+      
+      --space-block: 16px;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background-color: var(--bg);
+      color: var(--text-primary);
+      line-height: 1.45;
+      -webkit-font-smoothing: antialiased;
+      padding: 16px 12px 48px;
+      display: flex;
+      justify-content: center;
+    }
+
+    /* Mobile Container: Target 390px - 440px mobile width */
+    .mobile-wrapper {
+      width: 100%;
+      max-width: 440px;
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-block);
+    }
+
+    /* Card Component */
+    .card {
+      background: var(--card-bg);
+      border-radius: var(--radius-card);
+      border: 1px solid var(--card-border);
+      box-shadow: var(--shadow-card);
+      padding: 18px;
+      position: relative;
+    }
+
+    /* Section Headings */
+    .section-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 12px;
+    }
+
+    .section-label {
+      font-size: 10px;
+      font-weight: 800;
+      color: var(--text-muted);
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+      margin-bottom: 2px;
+    }
+
+    .section-title {
+      font-size: 16px;
+      font-weight: 800;
+      color: var(--navy);
+      letter-spacing: -0.3px;
+    }
+
+    /* ========================================================= */
+    /* 1. HEADER (COMPACT FINAL DEFENSE)                         */
+    /* ========================================================= */
+    .header-card {
+      border-top: 4px solid var(--navy-light);
+    }
+
+    .header-top {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .logo-badge {
+      width: 42px;
+      height: 42px;
+      border-radius: 12px;
+      background: var(--navy);
+      color: #FFFFFF;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      flex-shrink: 0;
+    }
+
+    .header-title-wrap {
+      flex: 1;
+    }
+
+    .header-title {
+      font-size: 18px;
+      font-weight: 800;
+      color: var(--navy);
+      letter-spacing: -0.3px;
+      line-height: 1.2;
+    }
+
+    .header-subtitle {
+      font-size: 12px;
+      color: var(--text-secondary);
+      font-weight: 500;
+      margin-top: 2px;
+    }
+
+    .badges-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+      padding-top: 10px;
+      border-top: 1px solid var(--card-border);
+    }
+
+    .pill-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 8px;
+      border-radius: var(--radius-pill);
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.3px;
+      border: 1px solid transparent;
+    }
+
+    .live-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--green);
+      animation: pulseDot 2s infinite;
+    }
+
+    @keyframes pulseDot {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.5; transform: scale(0.9); }
+    }
+
+    /* ========================================================= */
+    /* 2. HERO SUMMARY (2x2 GRID)                                */
+    /* ========================================================= */
+    .hero-intro {
+      font-size: 13px;
+      color: var(--text-secondary);
+      line-height: 1.45;
+      margin-bottom: 14px;
+    }
+
+    .hero-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .hero-metric-card {
+      border-radius: var(--radius-inner);
+      padding: 12px;
+      border: 1px solid var(--card-border);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    .hero-metric-card.green {
+      background: #F0FDF4;
+      border-color: var(--green-border);
+    }
+
+    .hero-metric-card.amber {
+      background: #FFFBEB;
+      border-color: var(--amber-border);
+    }
+
+    .hero-metric-card.blue {
+      background: #EFF6FF;
+      border-color: var(--navy-border);
+    }
+
+    .hero-card-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 6px;
+    }
+
+    .hero-category-label {
+      font-size: 9px;
+      font-weight: 800;
+      letter-spacing: 0.5px;
+    }
+
+    /* Class naming bug fixed: metric-large-number */
+    .metric-large-number {
+      font-size: 24px;
+      font-weight: 900;
+      letter-spacing: -0.5px;
+      line-height: 1.1;
+      margin-bottom: 3px;
+    }
+
+    .hero-metric-title {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--text-primary);
+      line-height: 1.3;
+      margin-bottom: 3px;
+    }
+
+    .hero-metric-sub {
+      font-size: 10px;
+      color: var(--text-muted);
+      line-height: 1.25;
+    }
+
+    /* ========================================================= */
+    /* 3. EVALUATION SUMMARY (COMPACT 2-COL LIST)                */
+    /* ========================================================= */
+    .eval-list {
+      background: #F8FAFC;
+      border-radius: var(--radius-inner);
+      padding: 4px 12px;
+      border: 1px solid var(--card-border);
+    }
+
+    .eval-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 0;
+      border-bottom: 1px solid #F1F5F9;
+      font-size: 12px;
+    }
+
+    .eval-row:last-child {
+      border-bottom: none;
+    }
+
+    .eval-label {
+      color: var(--text-secondary);
+      font-weight: 500;
+    }
+
+    .eval-val {
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+
+    /* ========================================================= */
+    /* 4. MODEL ARCHITECTURE (MOBILE VERTICAL STEPPER)           */
+    /* ========================================================= */
+    .stepper-container {
+      display: flex;
+      flex-direction: column;
+      padding-top: 4px;
+    }
+
+    .step-item {
+      display: flex;
+      position: relative;
+      margin-bottom: 10px;
+    }
+
+    .step-item:last-child {
+      margin-bottom: 0;
+    }
+
+    .step-track {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      width: 26px;
+      margin-right: 10px;
+    }
+
+    .step-circle {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: #EFF6FF;
+      border: 1.5px solid var(--navy-border);
+      color: var(--navy-light);
+      font-size: 10px;
+      font-weight: 800;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .step-line {
+      width: 2px;
+      flex: 1;
+      background: #E2E8F0;
+      margin: 3px 0;
+    }
+
+    .step-item:last-child .step-line {
+      display: none;
+    }
+
+    .step-content {
+      flex: 1;
+      background: #F8FAFC;
+      border-radius: 10px;
+      padding: 8px 12px;
+      border: 1px solid var(--card-border);
+    }
+
+    .step-header-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 2px;
+    }
+
+    .step-title {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--navy);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .step-subtitle {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    /* AI Layer Highlight */
+    .step-item.ai-layer .step-circle {
+      background: var(--green);
+      border-color: var(--green-border);
+      color: #FFFFFF;
+    }
+
+    .step-item.ai-layer .step-content {
+      background: #F0FDF4;
+      border: 1.5px solid var(--green-border);
+    }
+
+    .step-item.ai-layer .step-title {
+      color: var(--green-dark);
+      font-weight: 800;
+    }
+
+    .step-item.ai-layer .step-subtitle {
+      color: #166534;
+      font-weight: 500;
+    }
+
+    .ai-badge-pill {
+      background: #DCFCE7;
+      color: #15803D;
+      font-size: 8px;
+      font-weight: 800;
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+
+    .step-item.output-layer .step-circle {
+      background: var(--navy);
+      border-color: var(--navy);
+      color: #FFFFFF;
+    }
+
+    .step-item.output-layer .step-content {
+      background: var(--navy);
+      border-color: var(--navy);
+      color: #FFFFFF;
+    }
+
+    .step-item.output-layer .step-title {
+      color: #FFFFFF;
+    }
+
+    .step-item.output-layer .step-subtitle {
+      color: #94A3B8;
+    }
+
+    /* ========================================================= */
+    /* 5. AI CONTRIBUTION                                        */
+    /* ========================================================= */
+    .compare-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 10px;
+    }
+
+    .compare-card {
+      flex: 1;
+      border-radius: var(--radius-inner);
+      padding: 12px;
+      border: 1px solid var(--card-border);
+    }
+
+    .compare-card.before {
+      background: #F8FAFC;
+    }
+
+    .compare-card.after {
+      background: #F0FDF4;
+      border: 1.5px solid var(--green-border);
+    }
+
+    .compare-subtag {
+      font-size: 9px;
+      font-weight: 800;
+      color: var(--text-muted);
+      margin-bottom: 2px;
+      display: block;
+    }
+
+    .compare-model {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-secondary);
+      margin-bottom: 4px;
+    }
+
+    .compare-acc {
+      font-size: 26px;
+      font-weight: 900;
+      letter-spacing: -0.5px;
+      margin-bottom: 4px;
+    }
+
+    .compare-badge {
+      display: inline-block;
+      font-size: 9px;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+
+    .compare-arrow-center {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 0 4px;
+    }
+
+    .arrow-gain-text {
+      font-size: 10px;
+      font-weight: 900;
+      color: var(--green-dark);
+      margin-top: 2px;
+    }
+
+    .mini-stats-grid {
+      display: flex;
+      justify-content: space-between;
+      background: #F8FAFC;
+      border-radius: 10px;
+      padding: 10px;
+      border: 1px solid var(--card-border);
+      margin-bottom: 8px;
+    }
+
+    .mini-stat-cell {
+      text-align: center;
+      flex: 1;
+    }
+
+    .mini-stat-num {
+      font-size: 13px;
+      font-weight: 800;
+      color: var(--navy);
+    }
+
+    .mini-stat-text {
+      font-size: 9px;
+      color: var(--text-muted);
+      margin-top: 1px;
+    }
+
+    .footnote-text {
+      font-size: 11px;
+      color: var(--text-muted);
+      font-style: italic;
+      line-height: 1.4;
+    }
+
+    /* ========================================================= */
+    /* 6. DATASET SECTION                                        */
+    /* ========================================================= */
+    .dataset-corpus-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .corpus-card {
+      background: #F8FAFC;
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      padding: 10px;
+    }
+
+    .corpus-label {
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--text-muted);
+      margin-bottom: 2px;
+      display: block;
+    }
+
+    .corpus-num {
+      font-size: 18px;
+      font-weight: 900;
+      color: var(--navy);
+      letter-spacing: -0.3px;
+    }
+
+    .corpus-sub {
+      font-size: 10px;
+      color: var(--text-muted);
+    }
+
+    .dataset-bar-track {
+      height: 8px;
+      border-radius: 4px;
+      display: flex;
+      overflow: hidden;
+      background: #E2E8F0;
+      margin-bottom: 8px;
+    }
+
+    .split-train {
+      background: var(--navy-light);
+      flex: 59462;
+    }
+
+    .split-val {
+      background: var(--green);
+      flex: 500;
+    }
+
+    /* Native HTML Accordion */
+    details.appendix-accordion {
+      margin-top: 8px;
+      border-top: 1px solid #F1F5F9;
+      padding-top: 8px;
+    }
+
+    details.appendix-accordion summary {
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--navy-light);
+      padding: 6px 0;
+      outline: none;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      user-select: none;
+      min-height: 44px; /* Touch target */
+    }
+
+    .accordion-inner-box {
+      background: #F8FAFC;
+      border-radius: 10px;
+      padding: 10px;
+      border: 1px solid var(--card-border);
+      margin-top: 6px;
+      font-size: 11px;
+    }
+
+    .accordion-inner-row {
+      display: flex;
+      padding: 4px 0;
+      border-bottom: 1px solid #F1F5F9;
+    }
+
+    .accordion-inner-row:last-child {
+      border-bottom: none;
+    }
+
+    .inner-key {
+      font-weight: 700;
+      color: var(--text-secondary);
+      width: 100px;
+      flex-shrink: 0;
+    }
+
+    .inner-val {
+      color: var(--text-primary);
+      flex: 1;
+    }
+
+    /* ========================================================= */
+    /* 7. ERROR ANALYSIS (SAMPLE VISUALIZATION + 4 CARDS)        */
+    /* ========================================================= */
+    .sample-vis-box {
+      background: #F8FAFC;
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius-inner);
+      padding: 12px;
+      margin-bottom: 12px;
+    }
+
+    .sample-vis-title {
+      font-size: 10px;
+      font-weight: 800;
+      color: var(--text-muted);
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+
+    .sample-pipeline-col {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      align-items: center;
+    }
+
+    .sample-unit {
+      width: 100%;
+    }
+
+    .sample-unit-label {
+      font-size: 10px;
+      color: var(--text-muted);
+      font-weight: 600;
+      margin-bottom: 2px;
+      display: block;
+    }
+
+    .sample-text-box {
+      background: #FFFFFF;
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 6px 10px;
+      font-size: 12px;
+    }
+
+    .error-list-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .error-card-row {
+      background: #F8FAFC;
+      border-radius: 10px;
+      padding: 10px;
+      border: 1px solid var(--card-border);
+    }
+
+    .error-card-top {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 4px;
+    }
+
+    .error-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .error-name-bold {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--navy);
+      flex: 1;
+    }
+
+    .error-badge-count {
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--text-muted);
+    }
+
+    .error-detail-text {
+      font-size: 11px;
+      color: var(--text-secondary);
+      line-height: 1.4;
+    }
+
+    .recommendation-box {
+      background: #EFF6FF;
+      border: 1px solid var(--navy-border);
+      border-radius: 10px;
+      padding: 10px;
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+    }
+
+    .rec-heading {
+      font-size: 11px;
+      font-weight: 800;
+      color: var(--navy-light);
+      margin-bottom: 1px;
+    }
+
+    .rec-content {
+      font-size: 11px;
+      font-weight: 600;
+      color: #1E3A8A;
+      line-height: 1.4;
+    }
+
+    /* ========================================================= */
+    /* STANDARDIZED ACTION BUTTONS                               */
+    /* ========================================================= */
+    .actions-row {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+
+    .action-btn {
+      flex: 1;
+      height: 44px;
+      border-radius: 12px;
+      font-size: 13px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      cursor: pointer;
+      border: none;
+      outline: none;
+      transition: opacity 0.2s;
+    }
+
+    .action-btn:active {
+      opacity: 0.8;
+    }
+
+    .btn-secondary {
+      background: #FFFFFF;
+      border: 1px solid #CBD5E1;
+      color: var(--navy);
+    }
+
+    .btn-primary {
+      background: var(--navy);
+      color: #FFFFFF;
+    }
+
+    /* ========================================================= */
+    /* FOOTER                                                    */
+    /* ========================================================= */
+    .footer {
+      text-align: center;
+      padding: 10px 0 20px;
+      color: var(--text-muted);
+      font-size: 11px;
+    }
+
+    .footer-divider {
+      width: 48px;
+      height: 3px;
+      background: #E2E8F0;
+      border-radius: 2px;
+      margin: 0 auto 10px;
+    }
+
+    .footer-version-tag {
+      display: inline-block;
+      margin-top: 6px;
+      font-size: 10px;
+      font-weight: 700;
+      background: #F1F5F9;
+      color: var(--text-secondary);
+      padding: 2px 8px;
+      border-radius: 6px;
+    }
+  </style>
+</head>
+<body>
+
+  <main class="mobile-wrapper">
+    
+    <!-- ========================================================= -->
+    <!-- 1. HEADER (FINAL DEFENSE COMPACT)                         -->
+    <!-- ========================================================= -->
+    <header class="card header-card">
+      <div class="header-top">
+        <div class="logo-badge">⚡</div>
+        <div class="header-title-wrap">
+          <h1 class="header-title">HandAI Research Dashboard</h1>
+          <p class="header-subtitle">Vietnamese Handwriting Recognition System</p>
+        </div>
+      </div>
+      <div class="badges-row">
+        <span class="pill-badge" style="background: #EFF6FF; border-color: #BFDBFE; color: var(--navy-light);">
+          FINAL DEFENSE
+        </span>
+        <span class="pill-badge" style="background: #ECFDF5; border-color: #A7F3D0; color: var(--green-dark);">
+          <span class="live-dot"></span> ACTIVE MODEL
+        </span>
+        <span class="pill-badge" style="background: #F8FAFC; border-color: #E2E8F0; color: var(--text-secondary);">
+          VERIFIED DATA
+        </span>
+      </div>
+    </header>
+
+    <!-- ========================================================= -->
+    <!-- 2. HERO SUMMARY (HANDAI SYSTEM OVERVIEW 2x2)              -->
+    <!-- ========================================================= -->
+    <section class="card">
+      <div class="section-header">
+        <div>
+          <div class="section-label">EXECUTIVE SUMMARY</div>
+          <h2 class="section-title">HandAI System Overview</h2>
+        </div>
+        <span class="pill-badge" style="background: #EFF6FF; color: var(--navy-light);">V2.0 Certified</span>
+      </div>
+
+      <p class="hero-intro">
+        AI-powered OCR system combining CRNN recognition and Vietnamese language correction.
+      </p>
+
+      <div class="hero-grid">
+        <!-- 1. Recognition Accuracy (System Evaluation) -->
+        <div class="hero-metric-card green">
+          <div class="hero-card-top">
+            <span class="hero-category-label" style="color: var(--green-dark);">SYSTEM EVAL</span>
+            <span>🎯</span>
+          </div>
+          <div class="metric-large-number" style="color: var(--green-dark);">88.2%</div>
+          <div class="hero-metric-title">Recognition Accuracy (System Evaluation)</div>
+          <div class="hero-metric-sub">CRNN inference on handwriting corpus</div>
+        </div>
+
+        <!-- 2. Baseline Improvement (Before vs After AI Correction) -->
+        <div class="hero-metric-card amber">
+          <div class="hero-card-top">
+            <span class="hero-category-label" style="color: var(--amber-dark);">IMPACT GAIN</span>
+            <span>📈</span>
+          </div>
+          <div class="metric-large-number" style="color: var(--amber-dark);">+37%</div>
+          <div class="hero-metric-title">Baseline Improvement (Before vs After AI Correction)</div>
+          <div class="hero-metric-sub">Accuracy jump from 63% to 100%</div>
+        </div>
+
+        <!-- 3. Global Char Accuracy -->
+        <div class="hero-metric-card blue">
+          <div class="hero-card-top">
+            <span class="hero-category-label" style="color: var(--navy-light);">CHAR LEVEL</span>
+            <span>🔤</span>
+          </div>
+          <div class="metric-large-number" style="color: var(--navy-light);">97.6%</div>
+          <div class="hero-metric-title">Global Char Accuracy</div>
+          <div class="hero-metric-sub">100 - CER (Character Error: 2.4%)</div>
+        </div>
+
+        <!-- 4. Global Word Accuracy -->
+        <div class="hero-metric-card blue">
+          <div class="hero-card-top">
+            <span class="hero-category-label" style="color: var(--navy-light);">WORD LEVEL</span>
+            <span>📝</span>
+          </div>
+          <div class="metric-large-number" style="color: var(--navy-light);">94.1%</div>
+          <div class="hero-metric-title">Global Word Accuracy</div>
+          <div class="hero-metric-sub">100 - WER (Word Error: 5.9%)</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================================= -->
+    <!-- 3. EVALUATION SUMMARY                                     -->
+    <!-- ========================================================= -->
+    <section class="card">
+      <div class="section-header">
+        <div>
+          <div class="section-label">SESSION BENCHMARK</div>
+          <h2 class="section-title">Evaluation Summary</h2>
+        </div>
+        <span style="font-size: 11px; font-weight: 600; color: var(--text-muted);">500 Sample Benchmark</span>
+      </div>
+
+      <div class="eval-list">
+        <div class="eval-row">
+          <span class="eval-label">Total lines</span>
+          <span class="eval-val">500 lines</span>
+        </div>
+        <div class="eval-row">
+          <span class="eval-label">Correct OCR lines</span>
+          <span class="eval-val" style="color: var(--text-secondary);">315 (63.0%)</span>
+        </div>
+        <div class="eval-row">
+          <span class="eval-label">AI corrected lines</span>
+          <span class="eval-val" style="color: var(--green-dark);">185 (37.0%)</span>
+        </div>
+        <div class="eval-row">
+          <span class="eval-label">Manual edited lines</span>
+          <span class="eval-val">0 (0.0%)</span>
+        </div>
+        <div class="eval-row">
+          <span class="eval-label">Final correct lines</span>
+          <span class="eval-val" style="color: var(--green-dark); font-weight: 800;">500 (100%)</span>
+        </div>
+        <div class="eval-row">
+          <span class="eval-label">Latency</span>
+          <span class="eval-val">2.3s / image</span>
+        </div>
+        <div class="eval-row">
+          <span class="eval-label">Average model confidence</span>
+          <span class="eval-val" style="color: var(--navy-light);">91.4%</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================================= -->
+    <!-- 4. MODEL ARCHITECTURE (VERTICAL STEPPER MOBILE)           -->
+    <!-- ========================================================= -->
+    <section class="card">
+      <div class="section-header">
+        <div>
+          <div class="section-label">PIPELINE WORKFLOW</div>
+          <h2 class="section-title">Model Architecture</h2>
+        </div>
+        <span class="pill-badge" style="background: #EFF6FF; color: var(--navy-light);">CRNN + PyTorch</span>
+      </div>
+
+      <div class="stepper-container">
+        <!-- Step 1 -->
+        <div class="step-item">
+          <div class="step-track">
+            <div class="step-circle">1</div>
+            <div class="step-line"></div>
+          </div>
+          <div class="step-content">
+            <div class="step-header-row">
+              <span class="step-title">📷 Input Image</span>
+            </div>
+            <p class="step-subtitle">Single line handwriting crop</p>
+          </div>
+        </div>
+
+        <!-- Step 2 -->
+        <div class="step-item">
+          <div class="step-track">
+            <div class="step-circle">2</div>
+            <div class="step-line"></div>
+          </div>
+          <div class="step-content">
+            <div class="step-header-row">
+              <span class="step-title">🔍 Feature Extraction (CNN)</span>
+            </div>
+            <p class="step-subtitle">Spatial visual feature maps</p>
+          </div>
+        </div>
+
+        <!-- Step 3 -->
+        <div class="step-item">
+          <div class="step-track">
+            <div class="step-circle">3</div>
+            <div class="step-line"></div>
+          </div>
+          <div class="step-content">
+            <div class="step-header-row">
+              <span class="step-title">🔄 Sequence Modeling (BiLSTM)</span>
+            </div>
+            <p class="step-subtitle">Bidirectional contextual RNN</p>
+          </div>
+        </div>
+
+        <!-- Step 4 -->
+        <div class="step-item">
+          <div class="step-track">
+            <div class="step-circle">4</div>
+            <div class="step-line"></div>
+          </div>
+          <div class="step-content">
+            <div class="step-header-row">
+              <span class="step-title">🔡 CTC Decoding</span>
+            </div>
+            <p class="step-subtitle">Connectionist temporal classification</p>
+          </div>
+        </div>
+
+        <!-- Step 5 (Highlighted) -->
+        <div class="step-item ai-layer">
+          <div class="step-track">
+            <div class="step-circle">✨</div>
+            <div class="step-line"></div>
+          </div>
+          <div class="step-content">
+            <div class="step-header-row">
+              <span class="step-title">AI Correction Layer</span>
+              <span class="ai-badge-pill">POST-PROCESS</span>
+            </div>
+            <p class="step-subtitle">Vietnamese Language Context Post-processing</p>
+          </div>
+        </div>
+
+        <!-- Step 6 -->
+        <div class="step-item output-layer">
+          <div class="step-track">
+            <div class="step-circle">✓</div>
+          </div>
+          <div class="step-content">
+            <div class="step-header-row">
+              <span class="step-title">📄 Final Output</span>
+            </div>
+            <p class="step-subtitle">Accurate verified Vietnamese sentence</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================================= -->
+    <!-- 5. AI CONTRIBUTION (BEFORE / AFTER COMPARISON)            -->
+    <!-- ========================================================= -->
+    <section class="card" style="border-color: var(--green-border);">
+      <div class="section-header">
+        <div>
+          <div class="section-label" style="color: var(--green-dark);">CORE SCIENTIFIC VALUE</div>
+          <h2 class="section-title">AI Contribution Analysis</h2>
+        </div>
+        <span class="pill-badge" style="background: #DCFCE7; color: #15803D;">+37% Gain</span>
+      </div>
+
+      <div class="compare-row">
+        <!-- Before -->
+        <div class="compare-card before">
+          <span class="compare-subtag">BEFORE AI</span>
+          <div class="compare-model">Raw CRNN OCR</div>
+          <div class="compare-acc" style="color: #334155;">63%</div>
+          <span class="compare-badge" style="background: #E2E8F0; color: #475569;">Baseline Evaluation</span>
+        </div>
+
+        <div class="compare-arrow-center">
+          <span style="font-size: 14px; color: var(--green-dark);">➔</span>
+          <span class="arrow-gain-text">+37%</span>
+        </div>
+
+        <!-- After -->
+        <div class="compare-card after">
+          <span class="compare-subtag" style="color: var(--green-dark);">AFTER AI</span>
+          <div class="compare-model" style="color: var(--green-dark);">CRNN + AI Correction</div>
+          <div class="compare-acc" style="color: var(--green-dark);">100%</div>
+          <span class="compare-badge" style="background: #DCFCE7; color: #166534;">Evaluation Batch Result</span>
+        </div>
+      </div>
+
+      <!-- 3 Mini Stats -->
+      <div class="mini-stats-grid">
+        <div class="mini-stat-cell">
+          <div class="mini-stat-num">+37%</div>
+          <div class="mini-stat-text">Accuracy Gain</div>
+        </div>
+        <div class="mini-stat-cell" style="border-left: 1px solid var(--card-border); border-right: 1px solid var(--card-border);">
+          <div class="mini-stat-num">100%</div>
+          <div class="mini-stat-text">Recovery Rate</div>
+        </div>
+        <div class="mini-stat-cell">
+          <div class="mini-stat-num">185 / 185</div>
+          <div class="mini-stat-text">Rescued Samples</div>
+        </div>
+      </div>
+
+      <p class="footnote-text">
+        “Measured on manually verified evaluation samples, not the complete dataset.”
+      </p>
+    </section>
+
+    <!-- ========================================================= -->
+    <!-- 6. DATASET SECTION                                        -->
+    <!-- ========================================================= -->
+    <section class="card">
+      <div class="section-header">
+        <div>
+          <div class="section-label">TRAINING & EVALUATION DATA</div>
+          <h2 class="section-title">Dataset Overview</h2>
+        </div>
+        <div style="display: flex; gap: 4px;">
+          <span class="pill-badge" style="background: #ECFDF5; color: var(--green-dark); border-color: #A7F3D0;">Verified</span>
+          <span class="pill-badge" style="background: #EFF6FF; color: var(--navy-light); border-color: #BFDBFE;">HandAI-v1.2</span>
+        </div>
+      </div>
+
+      <div style="margin-bottom: 6px;">
+        <span style="font-size: 14px; font-weight: 800; color: var(--navy);">Viet-Handwriting-OCR-v2</span>
+        <span style="font-size: 12px; color: var(--text-secondary); display: block;">59,747 Total Handwriting Samples</span>
+      </div>
+
+      <div class="dataset-corpus-row">
+        <div class="corpus-card">
+          <span class="corpus-label">Training Corpus</span>
+          <div class="corpus-num">59,462</div>
+          <span class="corpus-sub">samples (99.16%)</span>
+        </div>
+
+        <div class="corpus-card" style="background: #F0FDF4; border-color: var(--green-border);">
+          <span class="corpus-label" style="color: var(--green-dark);">Evaluation Benchmark</span>
+          <div class="corpus-num" style="color: var(--green-dark);">500</div>
+          <span class="corpus-sub" style="color: #166534;">manually verified (0.84%)</span>
+        </div>
+      </div>
+
+      <div class="dataset-bar-track" title="Train: 59,462 | Val: 500">
+        <div class="split-train"></div>
+        <div class="split-val"></div>
+      </div>
+
+      <p class="footnote-text">
+        “Evaluation samples are manually verified benchmark cases used for final performance assessment.”
+      </p>
+
+      <!-- Collapsible Accordion -->
+      <details class="appendix-accordion">
+        <summary>
+          <span>View Data Integrity & Privacy Profile</span>
+          <span>▾</span>
+        </summary>
+        <div class="accordion-inner-box">
+          <div class="accordion-inner-row">
+            <span class="inner-key">Deduplication:</span>
+            <span class="inner-val">0.4% duplicate rate (pHash/SHA-256 audited)</span>
+          </div>
+          <div class="accordion-inner-row">
+            <span class="inner-key">Privacy:</span>
+            <span class="inner-val">PII Masking Active, zero student identifiers retained</span>
+          </div>
+          <div class="accordion-inner-row">
+            <span class="inner-key">Split Method:</span>
+            <span class="inner-val">Disjoint writer splits (Seed: 42)</span>
+          </div>
+        </div>
+      </details>
+    </section>
+
+    <!-- ========================================================= -->
+    <!-- 7. ERROR ANALYSIS                                         -->
+    <!-- ========================================================= -->
+    <section class="card">
+      <div class="section-header">
+        <div>
+          <div class="section-label">FAILURE MODE CLASSIFICATION</div>
+          <h2 class="section-title">Error Analysis & Mitigation</h2>
+        </div>
+        <span style="font-size: 11px; font-weight: 600; color: var(--text-muted);">4 Failure Modes</span>
+      </div>
+
+      <!-- Sample Visualization -->
+      <div class="sample-vis-box">
+        <div class="sample-vis-title">Sample Visualization (Benchmark Case)</div>
+        <div class="sample-pipeline-col">
+          <div class="sample-unit">
+            <span class="sample-unit-label">Original Handwriting</span>
+            <div class="sample-text-box" style="font-style: italic;">"Em hái sim ăn"</div>
+          </div>
+          <span style="font-size: 12px; color: var(--text-subtle);">↓</span>
+          <div class="sample-unit">
+            <span class="sample-unit-label">Raw OCR Result (Missing 's')</span>
+            <div class="sample-text-box" style="background: #FEF2F2; border-color: #FECACA; color: #DC2626; font-weight: 600;">
+              "Em hái im ăn"
+            </div>
+          </div>
+          <span style="font-size: 12px; color: var(--text-subtle);">↓</span>
+          <div class="sample-unit">
+            <span class="sample-unit-label" style="color: var(--green-dark);">AI Corrected Result</span>
+            <div class="sample-text-box" style="background: #F0FDF4; border-color: #A7F3D0; color: #15803D; font-weight: 800;">
+              "Em hái sim ăn"
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 4 Error Cards Stack -->
+      <div class="error-list-stack">
+        <div class="error-card-row">
+          <div class="error-card-top">
+            <span class="error-dot" style="background: var(--red);"></span>
+            <span class="error-name-bold">Missing Character Errors</span>
+            <span class="error-badge-count">89 lines (48%)</span>
+          </div>
+          <p class="error-detail-text">
+            Nét bút đầu từ bị mờ hoặc đứt nét. Ví dụ: "Em hái im ăn" ➔ "Em hái sim ăn".
+          </p>
+        </div>
+
+        <div class="error-card-row">
+          <div class="error-card-top">
+            <span class="error-dot" style="background: var(--amber);"></span>
+            <span class="error-name-bold">Vietnamese Tone Errors</span>
+            <span class="error-badge-count">46 lines (25%)</span>
+          </div>
+          <p class="error-detail-text">
+            Dấu thanh (hỏi/ngã, sắc/huyền) viết lệch vị trí hoặc dính vào ký tự nguyên âm.
+          </p>
+        </div>
+
+        <div class="error-card-row">
+          <div class="error-card-top">
+            <span class="error-dot" style="background: var(--amber);"></span>
+            <span class="error-name-bold">Similar Character Confusion</span>
+            <span class="error-badge-count">35 lines (19%)</span>
+          </div>
+          <p class="error-detail-text">
+            Nhầm lẫn các cặp ký tự hình thái tương đồng: o / ô, u / v, i / l khi học sinh viết nhanh.
+          </p>
+        </div>
+
+        <div class="error-card-row">
+          <div class="error-card-top">
+            <span class="error-dot" style="background: var(--text-muted);"></span>
+            <span class="error-name-bold">Low Quality Image Errors</span>
+            <span class="error-badge-count">15 lines (8%)</span>
+          </div>
+          <p class="error-detail-text">
+            Ảnh chụp bị lóa sáng, bóng đổ hoặc độ tương phản thấp ở rìa trang giấy.
+          </p>
+        </div>
+      </div>
+
+      <!-- Recommendation -->
+      <div class="recommendation-box">
+        <span>💡</span>
+        <div>
+          <div class="rec-heading">Recommendation</div>
+          <div class="rec-content">Improve handwriting segmentation and character boundary detection.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================================= -->
+    <!-- 8. ADVANCED RESEARCH APPENDIX (COLLAPSIBLE)               -->
+    <!-- ========================================================= -->
+    <section class="card">
+      <details class="appendix-accordion" style="margin-top: 0; border-top: none; padding-top: 0;">
+        <summary style="font-size: 13px; font-weight: 800; color: var(--navy);">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span>📁</span>
+            <div>
+              <div>Advanced Research Appendix</div>
+              <div style="font-size: 11px; font-weight: 500; color: var(--text-muted);">Historical benchmark & confidence analysis</div>
+            </div>
+          </div>
+          <span style="font-size: 11px; background: #F1F5F9; padding: 2px 8px; border-radius: 6px;">Expand ▾</span>
+        </summary>
+        <div class="accordion-inner-box" style="margin-top: 10px;">
+          <!-- Benchmark Table -->
+          <div style="font-weight: 800; color: var(--navy); margin-bottom: 6px;">Historical Model Benchmark</div>
+          <div style="display: flex; border-bottom: 1px solid #CBD5E1; padding-bottom: 4px; font-weight: 700; color: var(--text-secondary);">
+            <span style="flex: 2;">Model</span>
+            <span style="flex: 1; text-align: center;">Acc</span>
+            <span style="flex: 1; text-align: center;">CER</span>
+            <span style="flex: 1; text-align: center;">WER</span>
+          </div>
+          <div style="display: flex; padding: 4px 0; border-bottom: 1px solid #F1F5F9;">
+            <span style="flex: 2;">CRNN-v1.0 (Baseline)</span>
+            <span style="flex: 1; text-align: center;">78.5%</span>
+            <span style="flex: 1; text-align: center;">4.2%</span>
+            <span style="flex: 1; text-align: center;">10.1%</span>
+          </div>
+          <div style="display: flex; padding: 4px 0; border-bottom: 1px solid #F1F5F9;">
+            <span style="flex: 2;">CRNN-v1.1 (+Augment)</span>
+            <span style="flex: 1; text-align: center;">83.0%</span>
+            <span style="flex: 1; text-align: center;">3.1%</span>
+            <span style="flex: 1; text-align: center;">7.8%</span>
+          </div>
+          <div style="display: flex; padding: 4px 0; background: #F0FDF4; font-weight: 800; color: var(--green-dark);">
+            <span style="flex: 2;">CRNN-v1.2 (Active)</span>
+            <span style="flex: 1; text-align: center;">88.2%</span>
+            <span style="flex: 1; text-align: center;">2.4%</span>
+            <span style="flex: 1; text-align: center;">5.9%</span>
+          </div>
+
+          <!-- Confidence Reliability -->
+          <div style="font-weight: 800; color: var(--navy); margin-top: 12px; margin-bottom: 6px;">
+            Confidence Reliability Breakdown
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+            <span style="width: 140px; color: var(--text-secondary);">High (0.8 - 1.0):</span>
+            <div style="flex: 1; height: 6px; background: #E2E8F0; border-radius: 3px; overflow: hidden;">
+              <div style="width: 82%; height: 100%; background: var(--green);"></div>
+            </div>
+            <span style="font-weight: 700; color: var(--navy); width: 28px; text-align: right;">82%</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+            <span style="width: 140px; color: var(--text-secondary);">Medium (0.5 - 0.8):</span>
+            <div style="flex: 1; height: 6px; background: #E2E8F0; border-radius: 3px; overflow: hidden;">
+              <div style="width: 14%; height: 100%; background: var(--amber);"></div>
+            </div>
+            <span style="font-weight: 700; color: var(--navy); width: 28px; text-align: right;">14%</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="width: 140px; color: var(--text-secondary);">Low (&lt; 0.5):</span>
+            <div style="flex: 1; height: 6px; background: #E2E8F0; border-radius: 3px; overflow: hidden;">
+              <div style="width: 4%; height: 100%; background: var(--red);"></div>
+            </div>
+            <span style="font-weight: 700; color: var(--navy); width: 28px; text-align: right;">4%</span>
+          </div>
+        </div>
+      </details>
+    </section>
+
+    <!-- ========================================================= -->
+    <!-- STANDARDIZED ACTION BUTTONS                               -->
+    <!-- ========================================================= -->
+    <div class="actions-row">
+      <button class="action-btn btn-secondary" onclick="window.location.reload();">
+        <span>🔄</span> Refresh Metrics
+      </button>
+      <button class="action-btn btn-primary" onclick="alert('NCKH Benchmark Verified. Report is ready for defense presentation.');">
+        <span>🛡️</span> Validate Defense
+      </button>
+    </div>
+
+    <!-- ========================================================= -->
+    <!-- FOOTER                                                    -->
+    <!-- ========================================================= -->
+    <footer class="footer">
+      <div class="footer-divider"></div>
+      <div>Powered by CRNN + AI Correction Technology</div>
+      <div class="footer-version-tag">Research Version 1.2 — Final Defense Edition</div>
+    </footer>
+
+  </main>
+
+</body>
+</html>

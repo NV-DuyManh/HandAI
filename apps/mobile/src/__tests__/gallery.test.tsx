@@ -1,3 +1,5 @@
+/// <reference types="jest" />
+
 import React from 'react';
 import TestRenderer, { act } from 'react-test-renderer';
 import * as MediaLibrary from 'expo-media-library/legacy';

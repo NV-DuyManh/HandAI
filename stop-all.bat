@@ -1,18 +1,14 @@
 @echo off
 setlocal
-title HandAI - Stop All
-echo ============================================================
-echo   Stopping all HandAI processes...
-echo ============================================================
-
-for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":8001" ^| findstr "LISTENING"') do taskkill /f /t /pid %%a >nul 2>&1
-for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":8082" ^| findstr "LISTENING"') do taskkill /f /t /pid %%a >nul 2>&1
-for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":8083" ^| findstr "LISTENING"') do taskkill /f /t /pid %%a >nul 2>&1
-
+title HandAI - Stop All Services
 cd /d "%~dp0"
-if exist infra\docker-compose.yml (
-    docker compose -f infra\docker-compose.yml down >nul 2>&1
-)
 
-echo Done. All HandAI services stopped.
-pause
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0infra\stop-handai.ps1"
+set EXIT_CODE=%ERRORLEVEL%
+
+echo.
+if "%~1"=="" (
+    echo Press any key to close this window...
+    pause >nul
+)
+exit /b %EXIT_CODE%

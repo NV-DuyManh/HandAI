@@ -277,6 +277,10 @@ export default function MultilineResultScreen() {
         ? verifiedText
         : (verdict === 'CORRECT' ? (line.finalText || line.rawOcrText || line.predictedText) : line.predictedText);
 
+      const isTextDifferent = verifiedText !== undefined && verifiedText !== line.predictedText;
+      const effectiveVerdict: 'CORRECT' | 'CORRECTED' | 'SKIPPED' = isTextDifferent ? 'CORRECTED' : verdict;
+      const effectiveVerifiedText = effectiveVerdict === 'CORRECTED' ? (verifiedText || targetText) : undefined;
+
       // Immediate optimistic update of local state
       setTrial((prev) => {
         if (!prev) return prev;
@@ -284,8 +288,8 @@ export default function MultilineResultScreen() {
           if (l.lineId === line.lineId) {
             return {
               ...l,
-              verdict,
-              verifiedTextRaw: verifiedText !== undefined ? verifiedText : (verdict === 'CORRECT' ? (l.rawOcrText || l.predictedText) : l.verifiedTextRaw),
+              verdict: effectiveVerdict,
+              verifiedTextRaw: verifiedText !== undefined ? verifiedText : (effectiveVerdict === 'CORRECT' ? (l.rawOcrText || l.predictedText) : l.verifiedTextRaw),
               finalText: targetText,
               predictedText: targetText,
             };
@@ -298,8 +302,8 @@ export default function MultilineResultScreen() {
       const updatedLine = await OcrPilotService.submitLineFeedback(
         trialId,
         line.lineId,
-        verdict,
-        verifiedText
+        effectiveVerdict,
+        effectiveVerifiedText
       );
 
       // Reconcile with server response
@@ -555,10 +559,10 @@ export default function MultilineResultScreen() {
                       style={[styles.researchActionBtn, styles.researchKeepOcrBtn]}
                       onPress={() => handleFeedback(line, 'CORRECT', ocrText)}
                       accessibilityRole="button"
-                      accessibilityLabel="Keep Model Output"
+                      accessibilityLabel="Keep OCR Result"
                     >
                       <Ionicons name="shield-checkmark-outline" size={15} color="#334155" />
-                      <Text style={styles.researchKeepOcrBtnText}>Keep Model Output</Text>
+                      <Text style={styles.researchKeepOcrBtnText}>Keep OCR Result</Text>
                     </TouchableOpacity>
 
                     {isCandidateDistinct && firstCandidate?.text && firstCandidate.text.trim().length > 0 && (
@@ -880,7 +884,13 @@ export default function MultilineResultScreen() {
                       <TouchableOpacity
                         style={[styles.fbBtn, styles.fbSkipBtn]}
                         disabled={isSubmitting}
-                        onPress={() => handleFeedback(line, 'CORRECT', ocrText)}
+                        onPress={() => {
+                          if (ocrText === line.predictedText) {
+                            handleFeedback(line, 'CORRECT');
+                          } else {
+                            handleFeedback(line, 'CORRECTED', ocrText);
+                          }
+                        }}
                         accessibilityRole="button"
                         accessibilityLabel="Giữ OCR gốc"
                       >
@@ -1785,9 +1795,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 5,
-    paddingVertical: 8,
-    paddingHorizontal: 6,
-    borderRadius: 8,
+    minHeight: 44,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    borderRadius: 12,
   },
   researchKeepOcrBtn: {
     backgroundColor: '#F1F5F9',
@@ -1795,7 +1806,7 @@ const styles = StyleSheet.create({
     borderColor: '#CBD5E1',
   },
   researchKeepOcrBtnText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
     color: '#334155',
   },
@@ -1805,7 +1816,7 @@ const styles = StyleSheet.create({
     borderColor: '#1D4ED8',
   },
   researchUseAiBtnText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
     color: '#FFFFFF',
   },
@@ -1813,10 +1824,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: '#CBD5E1',
-    flex: 0.7,
   },
   researchEditBtnText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
     color: '#1E40AF',
   },

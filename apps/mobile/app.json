@@ -1,19 +1,21 @@
 {
   "expo": {
-    "name": "MathVisionKid",
-    "slug": "MathVisionKid",
+    "name": "HandAI",
+    "slug": "hand-ai",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
-    "scheme": "mathvisionkid",
+    "icon": "./assets/images/handai-icon.png",
+    "scheme": "handai",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/images/handai-icon.png",
+      "bundleIdentifier": "com.handai.research"
     },
     "android": {
+      "package": "com.handai.research",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
+        "backgroundColor": "#0B192C",
+        "foregroundImage": "./assets/images/handai-adaptive-icon.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
@@ -21,16 +23,16 @@
     },
     "web": {
       "output": "static",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/images/handai-favicon.png"
     },
     "plugins": [
       "expo-router",
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#208AEF",
-          "image": "./assets/images/splash-icon.png",
-          "imageWidth": 76
+          "backgroundColor": "#0B192C",
+          "image": "./assets/images/handai-splash.png",
+          "imageWidth": 120
         }
       ],
       "expo-secure-store"
@@ -41,3 +43,4 @@
     }
   }
 }
+

@@ -1,10 +1,13 @@
-import { resolveApiBaseUrl } from './apiResolver';
+import { resolveApiBaseUrl, resolveAiServiceUrl } from './apiResolver';
 import { getAppMode, isHandAIMode, AppMode } from './appMode';
 
 export const ENV = {
   // Dynamically resolves Metro LAN IP, explicit manual override, or localhost fallback.
   get API_BASE_URL(): string {
     return resolveApiBaseUrl();
+  },
+  get AI_SERVICE_URL(): string {
+    return resolveAiServiceUrl();
   },
   USE_MOCK: process.env.EXPO_PUBLIC_USE_MOCK === 'true',
   get APP_MODE(): AppMode {
@@ -14,4 +17,5 @@ export const ENV = {
     return isHandAIMode();
   },
 };
+
 

@@ -16,18 +16,26 @@ export default function SplashScreen() {
   useEffect(() => {
     // S00 - SPLASH logic
     const timer = setTimeout(() => {
-      if (isHandAI) {
-        // HAND_AI mode: Direct startup to Home (no login, no permissions)
-        router.replace('/(tabs)' as any);
-      } else if (auth?.isAuthenticated) {
-        router.replace('/(tabs)' as any);
-      } else {
-        router.replace('/login');
+      try {
+        if (isHandAI) {
+          // HAND_AI mode: Direct startup to Home (no login, no permissions)
+          router.replace('/(tabs)' as any);
+        } else if (auth?.isAuthenticated) {
+          router.replace('/(tabs)' as any);
+        } else {
+          router.replace('/login');
+        }
+      } catch (navErr) {
+        console.warn('[ROUTER] Splash navigation failed, falling back:', navErr);
+        try {
+          router.replace('/(tabs)' as any);
+        } catch {}
       }
     }, 1200);
 
     return () => clearTimeout(timer);
   }, [router, auth?.isAuthenticated, isHandAI]);
+
 
   return (
     <View style={styles.container}>

@@ -1,26 +1,23 @@
 @echo off
 setlocal
 title HandAI - AI Microservice (Port 8001)
-cd /d "%~dp0ai-service"
+cd /d "%~dp0"
 
-echo ============================================================
-echo   HandAI -- AI Microservice (FastAPI + PyTorch CRNN)
-echo ============================================================
-echo   Directory: %CD%
-echo.
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0infra\start-ai.ps1"
+set EXIT_CODE=%ERRORLEVEL%
 
-if exist ".venv\Scripts\activate.bat" (
-    echo [*] Activating Python virtual environment...
-    call .venv\Scripts\activate.bat
-) else (
-    echo [WARN] .venv not found in ai-service. Using system Python...
+if %EXIT_CODE% neq 0 (
+    echo.
+    echo [ERROR] AI Microservice failed to start with error code %EXIT_CODE%.
+    if "%~1"=="" pause
+    exit /b %EXIT_CODE%
 )
 
-echo [*] Starting Uvicorn server on http://127.0.0.1:8001 ...
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8001 --reload
-
-echo.
-echo ============================================================
-echo   AI Microservice stopped.
-echo ============================================================
-pause
+if "%~1"=="" (
+    echo.
+    echo Log file: infra\logs\ai-service.log
+    echo AI Microservice is running in background.
+    echo Press any key to exit this launcher window...
+    pause >nul
+)
+exit /b 0

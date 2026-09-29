@@ -1,3 +1,5 @@
+/// <reference types="jest" />
+
 import { submissionDraftStore, logImageFlow } from '../services/draft/submissionDraftStore';
 import {
   handAiAnalyticsStore,
@@ -145,7 +147,7 @@ describe('HandAI Flow, Image Lifecycle & Analytics Suite', () => {
             confidence: 0.95,
             verdict: 'CORRECT',
             selectedSource: 'OCR',
-            trainingEligible: true, verdict: 'CONFIRMED',
+            trainingEligible: true,
           },
           {
             lineId: 'line_2',
@@ -156,7 +158,7 @@ describe('HandAI Flow, Image Lifecycle & Analytics Suite', () => {
             confidence: 0.90,
             verdict: 'CONFIRMED',
             selectedSource: 'SUGGESTION_1',
-            trainingEligible: true, verdict: 'CONFIRMED',
+            trainingEligible: true,
           },
           {
             lineId: 'line_3',
@@ -166,7 +168,7 @@ describe('HandAI Flow, Image Lifecycle & Analytics Suite', () => {
             confidence: 0.85,
             verdict: 'CORRECTED',
             selectedSource: 'MANUAL_EDIT',
-            trainingEligible: true, verdict: 'CONFIRMED',
+            trainingEligible: true,
           },
           {
             lineId: 'line_4',
@@ -174,7 +176,7 @@ describe('HandAI Flow, Image Lifecycle & Analytics Suite', () => {
             confidence: 0.94,
             verdict: 'CORRECT',
             selectedSource: 'OCR',
-            trainingEligible: true, verdict: 'CONFIRMED',
+            trainingEligible: true,
           },
         ],
       };
@@ -1657,7 +1659,7 @@ describe('HandAI Flow, Image Lifecycle & Analytics Suite', () => {
               confidence: 0.95,
               verdict: 'CONFIRMED',
               selectedSource: 'OCR',
-              trainingEligible: true, verdict: 'CONFIRMED',
+              trainingEligible: true,
           },
             {
               lineId: 'l2',
@@ -1665,7 +1667,7 @@ describe('HandAI Flow, Image Lifecycle & Analytics Suite', () => {
               confidence: 0.93,
               verdict: 'CONFIRMED',
               selectedSource: 'OCR',
-              trainingEligible: true, verdict: 'CONFIRMED',
+              trainingEligible: true,
           },
           ],
         };

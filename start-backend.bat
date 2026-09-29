@@ -1,25 +1,23 @@
 @echo off
 setlocal
-title HandAI - Backend API (Port 8082)
-cd /d "%~dp0backend"
+title HandAI - Backend API (Port 8080)
+cd /d "%~dp0"
 
-echo ============================================================
-echo   HandAI -- Backend Business API (Spring Boot 3.3.4)
-echo ============================================================
-echo   Directory: %CD%
-echo.
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0infra\start-backend.ps1"
+set EXIT_CODE=%ERRORLEVEL%
 
-if not exist "gradlew.bat" (
-    echo [ERROR] gradlew.bat not found in backend directory!
-    pause
-    exit /b 1
+if %EXIT_CODE% neq 0 (
+    echo.
+    echo [ERROR] Backend API failed to start with error code %EXIT_CODE%.
+    if "%~1"=="" pause
+    exit /b %EXIT_CODE%
 )
 
-echo [*] Starting Spring Boot via Gradle wrapper...
-call gradlew.bat bootRun
-
-echo.
-echo ============================================================
-echo   Backend service stopped.
-echo ============================================================
-pause
+if "%~1"=="" (
+    echo.
+    echo Log file: infra\logs\backend.log
+    echo Backend API is running in background.
+    echo Press any key to exit this launcher window...
+    pause >nul
+)
+exit /b 0

@@ -17,8 +17,9 @@
  */
 
 module.exports = ({ config }) => {
-  const appMode = process.env.EXPO_PUBLIC_APP_MODE || process.env.APP_MODE;
+  const appMode = process.env.EXPO_PUBLIC_APP_MODE || process.env.APP_MODE || 'HAND_AI';
   const isHandAI = appMode === 'HAND_AI';
+
 
   if (isHandAI) {
     return {

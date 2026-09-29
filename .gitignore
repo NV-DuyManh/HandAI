@@ -27,4 +27,9 @@ bin/
 # IDE
 .idea/
 .vscode/
+.settings/
 *.swp
+
+# Temporary & PIDs
+infra/pids/
+scratch/

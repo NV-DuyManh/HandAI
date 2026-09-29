@@ -1,19 +1,16 @@
 @echo off
 setlocal
-title HandAI - Mobile Scanner (Expo Metro)
-cd /d "%~dp0apps\mobile"
+title HANDAI -- MOBILE APP
+cd /d "%~dp0"
 
-echo ============================================================
-echo   HandAI -- Mobile Scanner UI (React Native / Expo 57)
-echo ============================================================
-echo   Directory: %CD%
-echo.
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0infra\start-mobile.ps1"
+set EXIT_CODE=%ERRORLEVEL%
 
-echo [*] Starting Expo Metro Bundler in HandAI mode (Port 8083)...
-call npx expo start --port 8083 --clear
-
-echo.
-echo ============================================================
-echo   Expo Metro stopped.
-echo ============================================================
+if %EXIT_CODE% neq 0 (
+    echo.
+    echo [ERROR] Mobile Expo Bundler exited with code %EXIT_CODE%.
+    pause
+    exit /b %EXIT_CODE%
+)
 pause
+exit /b 0

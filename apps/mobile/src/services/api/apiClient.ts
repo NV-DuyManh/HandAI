@@ -8,7 +8,7 @@ import { isHandAIMode } from '../../config/appMode';
 // eslint-disable-next-line import/no-named-as-default-member
 const apiClient = axios.create({
   baseURL: ENV.API_BASE_URL,
-  timeout: 60000,
+  timeout: 20000,
 });
 
 let isRefreshing = false;

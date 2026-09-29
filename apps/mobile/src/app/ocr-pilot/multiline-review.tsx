@@ -17,6 +17,7 @@ import { OcrPilotService, LineBox, normalizeOcrError } from '../../services/api/
 import { submissionDraftStore } from '../../services/draft/submissionDraftStore';
 import { isHandAIMode } from '../../config/appMode';
 import { normalizeLocalFileUri } from '../../services/image/imagePipeline';
+import { OCRProgressLoader, OcrPhase } from '../../components/ocr/OCRProgressLoader';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
@@ -41,6 +42,9 @@ export default function MultilineReviewScreen() {
   }, [originalUri, draft?.privacyImageUri, cropInputUri, activeRecognitionUri]);
 
   const [loading, setLoading] = useState(true);
+  const [phase, setPhase] = useState<OcrPhase>('IDLE');
+  const [progress, setProgress] = useState(0);
+  const [ocrError, setOcrError] = useState<{ title: string; message: string; isTimeout?: boolean } | null>(null);
   const [requestStatus, setRequestStatus] = useState<RequestStatus>('IDLE');
   const [origWidth, setOrigWidth] = useState(draft?.width || 800);
   const [origHeight, setOrigHeight] = useState(draft?.height || 600);
@@ -53,6 +57,7 @@ export default function MultilineReviewScreen() {
   const displayWidth = SCREEN_WIDTH - 32;
   const detectRequestIdRef = useRef(0);
   const initialLoadDoneRef = useRef<string | null>(null);
+  const lastProcessedUriRef = useRef<string | null>(null);
   const operationGenerationRef = useRef(0);
   const activeAbortControllerRef = useRef<AbortController | null>(null);
   const hasNavigatedRef = useRef(false);
@@ -108,14 +113,51 @@ export default function MultilineReviewScreen() {
       force,
       timestamp: new Date().toISOString(),
     });
-    try {
-      setLoading(true);
-      setIsNetworkError(false);
-      const res = await OcrPilotService.detectLines(uri, true, force);
 
-      // Stale response guard: ignore if a newer request was dispatched
+    setLoading(true);
+    setOcrError(null);
+    setPhase('UPLOADING_IMAGE');
+    setProgress(15);
+    setIsNetworkError(false);
+
+    // Phase 2 requirement: Check OCR server health before heavy operation
+    const health = await OcrPilotService.checkOcrServerHealth(4000);
+    if (!health.ok) {
+      if (currentReqId !== detectRequestIdRef.current) return;
+      console.warn('[MULTILINE] Pre-detection health check failed:', health.message);
+      setIsNetworkError(true);
+      setPhase('ERROR');
+      setOcrError({
+        title: isHandAI ? 'Cannot Connect to OCR Server' : 'Không thể kết nối OCR server',
+        message: isHandAI
+          ? 'Cannot connect to OCR server. Please check backend or network.'
+          : 'Không thể kết nối OCR server.\nKiểm tra backend hoặc mạng.',
+      });
+      return;
+    }
+
+    setPhase('DETECTING_LINES');
+    setProgress(30);
+
+    const progressTimer = setInterval(() => {
+      setProgress((prev) => {
+        if (prev < 70) return prev + 5;
+        if (prev < 90) return prev + 2;
+        return prev;
+      });
+    }, 400);
+
+    try {
+      const res = await OcrPilotService.detectLines(uri, true, force, (p, ph) => {
+        if (ph === 'DETECTING_LINES') {
+          setPhase('DETECTING_LINES');
+          setProgress((prev) => Math.max(prev, p));
+        }
+      });
+      clearInterval(progressTimer);
+
       if (currentReqId !== detectRequestIdRef.current) {
-        console.warn(`[MULTILINE] Discarding stale detection response (reqId=${currentReqId}, active=${detectRequestIdRef.current})`);
+        console.warn(`[MULTILINE] Discarding stale detection response (reqId=${currentReqId})`);
         return;
       }
 
@@ -124,8 +166,11 @@ export default function MultilineReviewScreen() {
         height: res.height,
         lineCount: res.lines?.length || 0,
         detectorVersion: (res as any).detector_version,
-        lines: res.lines?.map(l => ({ id: l.line_id, y: l.y, height: l.height }))
       });
+
+      // Quick smooth finish animation
+      setProgress(100);
+      setPhase('DONE');
 
       if (res.width) setOrigWidth(res.width);
       if (res.height) {
@@ -144,7 +189,6 @@ server response: status=200, lineCount=${incomingLines.length}
 `);
 
       setBoxes((prev) => {
-        // Prevent accidental overwrite of valid boxes with 0 on background retry
         if (!force && prev.length > 0 && incomingLines.length === 0) {
           console.warn('[MULTILINE] Preserving existing boxes; ignoring 0-count response on non-force load');
           return prev;
@@ -157,57 +201,26 @@ server response: status=200, lineCount=${incomingLines.length}
       } else if (force) {
         setSelectedId(null);
       }
-    } catch (err: any) {
-      if (currentReqId !== detectRequestIdRef.current) return;
-      console.warn(`[LINE_DETECTION_DEBUG] FAILURE
-image dimensions: ${origWidth}x${origHeight}
-crop path: ${uri}
-preprocessing result: N/A (detection failed)
-server response: status=${err?.response?.status || 'No response'}, error=${err?.message || 'unknown'}
-`);
 
-      const status = err?.response?.status;
-      if (status === 401 || status === 403) {
-        if (isHandAI) {
-          Alert.alert(
-            'Recognition Service Unavailable',
-            'The handwriting recognition service is currently unavailable. Would you like to retry?',
-            [
-              { text: 'Retry', onPress: () => loadAutoDetection(uri, true) },
-              { text: 'Cancel', style: 'cancel' }
-            ]
-          );
-        } else {
-          Alert.alert(
-            'Phiên đăng nhập đã hết hạn',
-            'Vui lòng đăng nhập lại để tiếp tục.',
-            [
-              { text: 'Đăng nhập', onPress: () => router.replace('/login') }
-            ]
-          );
+      setTimeout(() => {
+        if (currentReqId === detectRequestIdRef.current) {
+          setLoading(false);
+          setPhase('IDLE');
         }
-      } else if (!err?.response && (err?.message?.includes('Network Error') || err?.message?.includes('Network request failed') || err?.message?.toLowerCase().includes('failed to fetch'))) {
-        setIsNetworkError(true);
-        Alert.alert(
-          isHandAI ? 'Connection Error' : 'Lỗi kết nối',
-          isHandAI ? 'Unable to connect to the recognition server. Please check your network.' : 'Không thể kết nối đến máy chủ nhận diện. Vui lòng kiểm tra lại mạng.'
-        );
-      } else {
-        Alert.alert(
-          isHandAI ? 'Detection Warning' : 'Lỗi nhận diện',
-          isHandAI ? 'Could not automatically detect text lines. Please retry or add manually.' : 'Không thể tự động phát hiện dòng chữ. Vui lòng thử lại hoặc thêm thủ công.'
-        );
-      }
+      }, 300);
+    } catch (err: any) {
+      clearInterval(progressTimer);
+      if (currentReqId !== detectRequestIdRef.current) return;
 
-      // Empty lines on detection failure only if user explicitly forced refresh or no boxes exist
+      const norm = normalizeOcrError(err);
+      console.warn(`[LINE_DETECTION_DEBUG] FAILURE: ${norm.technical}`);
+
+      setPhase('ERROR');
+      setOcrError(norm);
       setBoxes((prev) => (force ? [] : prev));
       if (force) setSelectedId(null);
-    } finally {
-      if (currentReqId === detectRequestIdRef.current) {
-        setLoading(false);
-      }
     }
-  }, [displayWidth, router, isHandAI]);
+  }, [displayWidth, isHandAI]);
 
   useEffect(() => {
     if (!imageUri) {
@@ -221,17 +234,14 @@ server response: status=${err?.response?.status || 'No response'}, error=${err?.
       return;
     }
 
-    if (initialLoadDoneRef.current === imageSessionId) return;
-    
-    // Clear old state before starting new detection on a new image
-    if (initialLoadDoneRef.current !== null) {
-      setBoxes([]);
-      setSelectedId(null);
+    // Only process once per unique image session / URI (PHẦN 5)
+    if (lastProcessedUriRef.current === imageUri && initialLoadDoneRef.current === imageSessionId) {
+      return;
     }
-    
+
+    lastProcessedUriRef.current = imageUri;
     initialLoadDoneRef.current = imageSessionId;
 
-    // Inspect real image dimensions if not present
     Image.getSize(
       imageUri,
       (w, h) => {
@@ -239,13 +249,13 @@ server response: status=${err?.response?.status || 'No response'}, error=${err?.
         setOrigHeight(h);
         const calculatedH = (h / w) * displayWidth;
         setDisplayHeight(Math.min(calculatedH, 450));
-        loadAutoDetection(imageUri, true);
+        loadAutoDetection(imageUri, false);
       },
       () => {
-        loadAutoDetection(imageUri, true);
+        loadAutoDetection(imageUri, false);
       }
     );
-  }, [imageUri, displayWidth, router, loadAutoDetection, imageSessionId]);
+  }, [imageUri, imageSessionId, loadAutoDetection, displayWidth, isHandAI, router]);
 
   const scaleX = displayWidth / (origWidth || 1);
   const scaleY = displayHeight / (origHeight || 1);
@@ -339,6 +349,17 @@ server response: status=${err?.response?.status || 'No response'}, error=${err?.
     activeAbortControllerRef.current = abortController;
 
     setRequestStatus('SUBMITTING');
+    setPhase('OCR_PROCESSING');
+    setProgress(55);
+    setOcrError(null);
+
+    const progressTimer = setInterval(() => {
+      setProgress((prev) => {
+        if (prev < 82) return prev + 3;
+        if (prev < 92) return prev + 1;
+        return prev;
+      });
+    }, 400);
 
     try {
       // Deterministically sort top-to-bottom
@@ -350,8 +371,15 @@ server response: status=${err?.response?.status || 'No response'}, error=${err?.
         renumbered,
         (draft?.source as any) || 'CAMERA',
         true,   // Privacy confirmed
-        abortController.signal
+        abortController.signal,
+        (p, ph) => {
+          if (ph === 'AI_CORRECTION') {
+            setPhase('AI_CORRECTION');
+            setProgress(88);
+          }
+        }
       );
+      clearInterval(progressTimer);
 
       // Verify this request is still the active generation (not cancelled/superseded by back/blur)
       if (currentGen !== operationGenerationRef.current) {
@@ -359,39 +387,33 @@ server response: status=${err?.response?.status || 'No response'}, error=${err?.
         return;
       }
 
+      setProgress(100);
+      setPhase('DONE');
       setRequestStatus('SUCCESS');
 
-      if (!hasNavigatedRef.current) {
-        hasNavigatedRef.current = true;
-        router.push({
-          pathname: '/ocr-pilot/multiline-result' as any,
-          params: { trialId: trial.trialId },
-        });
-      }
+      setTimeout(() => {
+        if (!hasNavigatedRef.current) {
+          hasNavigatedRef.current = true;
+          router.push({
+            pathname: '/ocr-pilot/multiline-result' as any,
+            params: { trialId: trial.trialId },
+          });
+        }
+      }, 300);
     } catch (e: any) {
+      clearInterval(progressTimer);
       if (currentGen !== operationGenerationRef.current) {
-        return; // Ignore error from superseded / cancelled request
+        return;
       }
-      setRequestStatus('ERROR');
-      if (!e?.name?.includes('Abort') && !e?.message?.includes('canceled') && !e?.message?.includes('aborted')) {
-        const errInfo = normalizeOcrError(e);
-        console.error('[MULTILINE] Submit error details:', errInfo.technical);
-        Alert.alert(
-          errInfo.title,
-          errInfo.message,
-          isHandAI
-            ? [
-                { text: 'Retry', onPress: () => handleConfirmLines() },
-                { text: 'Cancel', style: 'cancel' },
-              ]
-            : [
-                { text: 'Đóng', style: 'cancel' },
-              ]
-        );
-      }
+      setRequestStatus('IDLE');
+      const errInfo = normalizeOcrError(e);
+      console.error('[MULTILINE] Submit error details:', errInfo.technical);
+      Alert.alert(
+        isHandAI ? 'Recognition Failed' : 'Chưa nhận diện được',
+        errInfo.message || (isHandAI ? 'Please try again.' : 'Vui lòng thử lại.')
+      );
     } finally {
       if (currentGen === operationGenerationRef.current) {
-        // Always reset to IDLE so the button never stays permanently spinning!
         setRequestStatus('IDLE');
       }
     }
@@ -399,12 +421,15 @@ server response: status=${err?.response?.status || 'No response'}, error=${err?.
 
   if (loading) {
     return (
-      <View style={styles.centerContainer}>
-        <ActivityIndicator size="large" color={COLORS.primary} />
-        <Text style={styles.loadingText}>
-          {isHandAI ? 'Automatically detecting text lines...' : 'Đang tự động phát hiện các dòng chữ...'}
-        </Text>
-      </View>
+      <OCRProgressLoader
+        phase={phase}
+        progress={progress}
+        title={isHandAI ? 'Detecting Handwriting Lines' : 'Đang tìm các dòng chữ viết'}
+        error={ocrError}
+        onRetry={() => loadAutoDetection(imageUri, true)}
+        onCancel={handleBack}
+        isHandAI={isHandAI}
+      />
     );
   }
 
@@ -731,6 +756,19 @@ server response: status=${err?.response?.status || 'No response'}, error=${err?.
           )}
         </TouchableOpacity>
       </View>
+      {requestStatus === 'SUBMITTING' && (
+        <View style={styles.submittingOverlay}>
+          <View style={styles.submittingCard}>
+            <ActivityIndicator size="large" color="#2563EB" />
+            <Text style={styles.submittingTitle}>
+              {isHandAI ? 'Running Recognition...' : 'Đang nhận diện chữ viết...'}
+            </Text>
+            <Text style={styles.submittingSubtitle}>
+              {isHandAI ? 'Processing all confirmed lines' : 'Đang phân tích các dòng chữ...'}
+            </Text>
+          </View>
+        </View>
+      )}
     </ScrollView>
   );
 }
@@ -1064,6 +1102,41 @@ const styles = StyleSheet.create({
     color: '#BFDBFE',
     fontWeight: '500',
     marginTop: 1,
+  },
+  submittingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(248, 250, 252, 0.92)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 100,
+  },
+  submittingCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    paddingVertical: 32,
+    paddingHorizontal: 40,
+    alignItems: 'center',
+    gap: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  submittingTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1E293B',
+    marginTop: 4,
+  },
+  submittingSubtitle: {
+    fontSize: 13,
+    color: '#64748B',
+    fontWeight: '400',
   },
 });
 

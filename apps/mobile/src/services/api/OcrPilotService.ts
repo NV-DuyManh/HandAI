@@ -1,4 +1,5 @@
 import { Platform } from 'react-native';
+import * as ImageManipulator from 'expo-image-manipulator';
 import apiClient from './apiClient';
 import { ensureFileUri } from '../image/imagePipeline';
 import { isHandAIMode } from '../../config/appMode';
@@ -6,20 +7,6 @@ import { tokenStorage } from '../auth/tokenStorage';
 
 /**
  * Send a multipart POST request with file + string params.
- *
- * IMPORTANT — Two independent bugs must be avoided:
- *
- * 1. Expo SDK 57 overrides global.fetch with its own "winter/fetch" which
- *    converts FormData via convertFormDataAsync(). That code only handles
- *    string | Blob | {bytes()}. React Native's FormData file objects
- *    ({uri, name, type}) are NONE of those → throws
- *    "Unsupported FormDataPart implementation".
- *    FIX: Use XMLHttpRequest — it bypasses Expo's fetch and goes directly
- *    to React Native's native OkHttp networking layer.
- *
- * 2. On Android, OkHttp can struggle with mixed string + file FormData parts.
- *    FIX: Put string params in URL query string (Spring Boot @RequestParam
- *    reads from both), keep FormData file-only.
  */
 async function postMultipart<T>(
   endpoint: string,
@@ -29,8 +16,6 @@ async function postMultipart<T>(
 ): Promise<T> {
   const path = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
 
-  // Build FormData with the file part AND string parts in the HTTP body
-  // (Prevents giant URL query strings from exceeding Tomcat's 8KB header buffer limit)
   const formData = new FormData();
   formData.append(fileField.key, {
     uri: fileField.uri,
@@ -45,7 +30,6 @@ async function postMultipart<T>(
   }
 
   const url = path;
-
   const token = await tokenStorage.getAccessToken();
   const authHeaderStatus = token ? 'present' : 'absent';
   console.log(`[HAND_AI DEBUG]\nBefore OCR request log:\n\nEndpoint:\n${endpoint}\n\nAuth header:\n${authHeaderStatus}\n`);
@@ -164,17 +148,14 @@ export interface MultilineLineResult {
   height?: number;
   lineImageObjectKey?: string;
   lineImageSha256?: string;
-  /** Legacy effective-text alias mirroring finalText for backwards compatibility */
   predictedText: string;
   confidence?: number;
-  /** Immutable raw CRNN prediction / raw OCR output. Never mutated by post-correction or user edits. */
   rawOcrText?: string;
   rawOcrConfidence?: number;
   correctedText?: string;
   correctionConfidence?: number;
   correctionApplied?: boolean;
   correctionDecision?: AdvisorDecision;
-  /** Current effective text for this line (CRNN raw, auto-applied, advisor choice, or manual edit) */
   finalText?: string;
   minTokenConfidence?: number;
   p10TokenConfidence?: number;
@@ -190,7 +171,6 @@ export interface MultilineLineResult {
   geminiStatus?: string;
   geminiModel?: string;
   suggestions?: AdvisorSuggestion[];
-
   blankRatio?: number;
   meanEntropy?: number;
   verifiedTextRaw?: string;
@@ -198,12 +178,8 @@ export interface MultilineLineResult {
   verdict: string;
   trainingEligible: boolean;
   feedbackAt?: string;
-
-  /** Canonical current text strictly from resolveLineDisplayState (PROD.4A.1) */
   currentText?: string;
-  /** Selected source: OCR | SUGGESTION_1 | SUGGESTION_2 | MANUAL_EDIT */
-  selectedSource?: 'OCR' | 'SUGGESTION_1' | 'SUGGESTION_2' | 'MANUAL_EDIT' | 'ocr' | 'suggestion_1' | 'suggestion_2' | 'manual_edit' | string;
-  /** Selection reason explaining the decision */
+  selectedSource?: string;
   selectionReason?: string;
   decisionReason?: string;
 }
@@ -235,6 +211,7 @@ export interface MultilineTrialResult {
 
 export class OcrPilotService {
   private static cachedTrials = new Map<string, MultilineTrialResult>();
+  private static detectionCache = new Map<string, MultilineDetectResult>();
 
   static cacheTrial(trial: MultilineTrialResult): void {
     if (trial && trial.trialId) {
@@ -250,6 +227,43 @@ export class OcrPilotService {
     return Array.from(this.cachedTrials.values());
   }
 
+  static clearDetectionCache(): void {
+    this.detectionCache.clear();
+  }
+
+  /**
+   * Health check before running heavy OCR operations.
+   * Hits Spring Boot /api/v1/handai/health with a fast timeout (4000ms).
+   */
+  static async checkOcrServerHealth(timeoutMs: number = 4000): Promise<{
+    ok: boolean;
+    mode?: string;
+    status?: string;
+    message?: string;
+  }> {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      const res = await apiClient.get('/handai/health', {
+        signal: controller.signal,
+        timeout: timeoutMs,
+      });
+      clearTimeout(timer);
+      if (res.status === 200 && (res.data?.status === 'UP' || res.data?.mode)) {
+        return { ok: true, mode: res.data.mode, status: res.data.status };
+      }
+      return { ok: false, message: 'Server health check returned non-UP status' };
+    } catch (err: any) {
+      console.warn('[OCR_PILOT] Server health check failed:', err?.message || err);
+      return {
+        ok: false,
+        message: err?.message?.includes('timeout')
+          ? 'Hết thời gian chờ kết nối máy chủ'
+          : 'Không thể kết nối OCR server. Kiểm tra backend hoặc mạng.',
+      };
+    }
+  }
+
   // Helper to extract file info from a URI
   private static fileInfoFromUri(rawUri: string, fallbackName: string) {
     const cleanUri = ensureFileUri(Array.isArray(rawUri) ? rawUri[0] : rawUri);
@@ -261,6 +275,55 @@ export class OcrPilotService {
     return { uri, name: safeFilename, type };
   }
 
+  /**
+   * Prepares and optimizes image prior to upload:
+   * Resizes max width to 800px with 80% JPEG quality to prevent bandwidth saturation
+   * while preserving handwriting stroke clarity for CRNN.
+   */
+  private static async prepareOptimizedImage(rawUri: string, fallbackName: string): Promise<{
+    uri: string;
+    name: string;
+    type: string;
+    prepTimeMs: number;
+    width?: number;
+    height?: number;
+  }> {
+    const t0 = Date.now();
+    const cleanUri = ensureFileUri(Array.isArray(rawUri) ? rawUri[0] : rawUri);
+
+    try {
+      if (Platform.OS === 'web' || !cleanUri) {
+        return { ...this.fileInfoFromUri(cleanUri, fallbackName), prepTimeMs: 0 };
+      }
+
+      const manipulated = await ImageManipulator.manipulateAsync(
+        cleanUri,
+        [{ resize: { width: 800 } }],
+        {
+          compress: 0.8,
+          format: ImageManipulator.SaveFormat.JPEG,
+        }
+      );
+
+      const prepTimeMs = Date.now() - t0;
+      console.log(`[OCR_METRICS] IMAGE_PREP_DONE | width=${manipulated.width} | height=${manipulated.height} | duration=${prepTimeMs}ms`);
+
+      const filename = fallbackName.endsWith('.jpg') ? fallbackName : `${fallbackName}.jpg`;
+      const uri = Platform.OS === 'ios' ? manipulated.uri.replace('file://', '') : manipulated.uri;
+      return {
+        uri,
+        name: filename,
+        type: 'image/jpeg',
+        prepTimeMs,
+        width: manipulated.width,
+        height: manipulated.height,
+      };
+    } catch (e) {
+      console.warn('[OCR_PILOT] Image optimization fallback to raw:', e);
+      return { ...this.fileInfoFromUri(cleanUri, fallbackName), prepTimeMs: Date.now() - t0 };
+    }
+  }
+
   // Single-line Pilot 1 methods
   static async createTrial(
     uri: string, 
@@ -268,10 +331,10 @@ export class OcrPilotService {
     isTestData: boolean = false,
     privacyConfirmed: boolean = true
   ): Promise<OcrTrialResult> {
-    const file = this.fileInfoFromUri(uri, 'ocr_line.jpg');
+    const file = await this.prepareOptimizedImage(uri, 'ocr_line.jpg');
     return await postMultipart<OcrTrialResult>(
       '/ocr/trials',
-      { key: 'image', ...file },
+      { key: 'image', uri: file.uri, name: file.name, type: file.type },
       {
         source,
         isTestData: String(isTestData),
@@ -311,50 +374,80 @@ export class OcrPilotService {
     return path;
   }
 
-  // Multi-line Pilot 2 methods
+  // Multi-line Pilot 2 methods with caching, timeout, and metrics logging
   static async detectLines(
     uri: string,
     privacyConfirmed: boolean = true,
-    forceRedetect: boolean = false
+    forceRedetect: boolean = false,
+    onProgress?: (progress: number, phaseName: string) => void
   ): Promise<MultilineDetectResult> {
-    const file = this.fileInfoFromUri(uri, 'page.jpg');
+    const tStart = Date.now();
+    const reqId = 'req_' + Math.random().toString(36).substring(2, 9) + '_' + Date.now().toString(36);
+    console.log(`[OCR_METRICS] OCR_REQUEST_START | reqId=${reqId} | timestamp=${new Date().toISOString()}`);
+
+    // In-memory cache lookup
+    if (!forceRedetect && this.detectionCache.has(uri)) {
+      console.log(`[OCR_METRICS] CACHE_HIT | reqId=${reqId} | uri=${uri}`);
+      onProgress?.(100, 'DONE');
+      return this.detectionCache.get(uri)!;
+    }
+
+    onProgress?.(15, 'UPLOADING_IMAGE');
+
+    // Step 1: Optimize & resize image
+    const file = await this.prepareOptimizedImage(uri, 'page.jpg');
+    onProgress?.(30, 'DETECTING_LINES');
+
     const endpoint = this.getEndpoint('/ocr/multiline/detect');
     console.log('[OCR_PILOT] Requesting detectLines for URI:', uri, '| Endpoint:', endpoint, '| BaseURL:', apiClient.defaults.baseURL);
+
+    // 15 seconds strict timeout
+    const controller = new AbortController();
+    const timeoutTimer = setTimeout(() => {
+      console.warn(`[OCR_PILOT] detectLines TIMEOUT after 15s (reqId=${reqId})`);
+      controller.abort();
+    }, 15000);
+
     try {
       const result = await postMultipart<MultilineDetectResult>(
         endpoint,
-        { key: 'image', ...file },
+        { key: 'image', uri: file.uri, name: file.name, type: file.type },
         { 
           privacyConfirmed: String(privacyConfirmed),
           forceRedetect: String(forceRedetect),
           _t: Date.now().toString()
         },
+        controller.signal
       );
-      console.log('[OCR_PILOT] detectLines success:', {
-        width: result.width,
-        height: result.height,
-        linesCount: result.lines?.length || 0,
-        detectorVersion: (result as any).detectorVersion || (result as any).detector_version,
-      });
-      if (__DEV__ && result.diagnostics) {
-        const d = result.diagnostics;
-        result.requestId = d.requestId || (result as any).requestId;
-        console.log(
-          `[OCR-PHYSICAL]\n` +
-          `requestId=${result.requestId || 'unknown'}\n` +
-          `recognitionEngine=${d.recognitionEngine || 'CRNN'}\n` +
-          `segmentationSource=${d.segmentationSource || 'LOCAL_CV'}\n` +
-          `correctionSource=${d.correctionSource || 'NONE'}\n` +
-          `finalTextSource=${d.finalTextSource || 'CRNN_RAW'}\n` +
-          `groqLineAssistUsed=${d.groqLineAssistUsed ?? false}\n` +
-          `groqCorrectionUsed=${d.groqCorrectionUsed ?? false}\n` +
-          `groqCalls=${d.groqCalls ?? 0}\n` +
-          `lineCount=${result.lines?.length || 0}\n` +
-          `totalLatencyMs=${d.totalLatencyMs ?? 'N/A'}`
-        );
-      }
+      clearTimeout(timeoutTimer);
+
+      const durationMs = Date.now() - tStart;
+      const durationSeconds = (durationMs / 1000).toFixed(2);
+      const linesCount = result.lines?.length || 0;
+
+      console.log(`[OCR_METRICS] LINE_DETECTION_DONE | reqId=${reqId} | duration=${durationSeconds}s | lines=${linesCount}`);
+      console.log(`[OCR_METRICS] TOTAL_LATENCY | reqId=${reqId} | total=${durationSeconds}s`);
+
+      // Store in memory cache
+      this.detectionCache.set(uri, result);
+      onProgress?.(100, 'DONE');
+
       return result;
     } catch (err: any) {
+      clearTimeout(timeoutTimer);
+      const isTimeout =
+        err?.name === 'AbortError' ||
+        err?.code === 'ECONNABORTED' ||
+        err?.message?.includes('timeout') ||
+        (Date.now() - tStart >= 14500);
+
+      if (isTimeout) {
+        const timeoutErr = new Error('Quá thời gian chờ máy chủ nhận diện (15 giây).');
+        (timeoutErr as any).isTimeout = true;
+        (timeoutErr as any).code = 'TIMEOUT';
+        throw timeoutErr;
+      }
+
       console.error('[OCR_PILOT] detectLines network/server error:', err?.message || err, err?.response?.data);
       throw err;
     }
@@ -388,7 +481,6 @@ export class OcrPilotService {
       correctedText: line.correctedText ?? undefined,
       correctionApplied: line.correctionApplied ?? undefined,
       correctionDecision: line.correctionDecision ?? undefined,
-      // Keep suggestions only if needed for fallback compatibility
       suggestions: line.suggestions && line.suggestions.length > 0 ? line.suggestions : undefined,
     };
   }
@@ -398,25 +490,66 @@ export class OcrPilotService {
     confirmedLines: LineBox[],
     source: 'CAMERA' | 'GALLERY' = 'CAMERA',
     privacyConfirmed: boolean = true,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    onProgress?: (progress: number, phaseName: string) => void
   ): Promise<MultilineTrialResult> {
-    const file = this.fileInfoFromUri(uri, 'page.jpg');
+    const tStart = Date.now();
+    const reqId = 'req_trial_' + Math.random().toString(36).substring(2, 9);
+    console.log(`[OCR_METRICS] OCR_REQUEST_START | reqId=${reqId} | type=createMultilineTrial | timestamp=${new Date().toISOString()}`);
+
+    onProgress?.(20, 'UPLOADING_IMAGE');
+    const file = await this.prepareOptimizedImage(uri, 'page.jpg');
+    onProgress?.(55, 'OCR_PROCESSING');
+
     const minimizedLines = confirmedLines.map((l) => this.minimizeLineForTransport(l));
     const endpoint = this.getEndpoint('/ocr/multiline/trials');
-    const res = await postMultipart<MultilineTrialResult>(
-      endpoint,
-      { key: 'image', ...file },
-      {
-        source,
-        privacyConfirmed: String(privacyConfirmed),
-        confirmedLines: JSON.stringify(minimizedLines),
-      },
-      signal
-    );
-    if (res && res.trialId) {
-      this.cacheTrial(res);
+
+    // 30 seconds timeout
+    const controller = new AbortController();
+    const timeoutTimer = setTimeout(() => {
+      console.warn(`[OCR_PILOT] createMultilineTrial TIMEOUT after 30s (reqId=${reqId})`);
+      controller.abort();
+    }, 30000);
+
+    try {
+      const combinedSignal = signal || controller.signal;
+      const res = await postMultipart<MultilineTrialResult>(
+        endpoint,
+        { key: 'image', uri: file.uri, name: file.name, type: file.type },
+        {
+          source,
+          privacyConfirmed: String(privacyConfirmed),
+          confirmedLines: JSON.stringify(minimizedLines),
+        },
+        combinedSignal
+      );
+      clearTimeout(timeoutTimer);
+
+      const totalMs = Date.now() - tStart;
+      console.log(`[OCR_METRICS] OCR_DONE | reqId=${reqId} | duration=${(totalMs / 1000).toFixed(2)}s`);
+      onProgress?.(85, 'AI_CORRECTION');
+
+      if (res && res.trialId) {
+        this.cacheTrial(res);
+      }
+      onProgress?.(100, 'DONE');
+      return res;
+    } catch (err: any) {
+      clearTimeout(timeoutTimer);
+      const isTimeout =
+        err?.name === 'AbortError' ||
+        err?.code === 'ECONNABORTED' ||
+        err?.message?.includes('timeout') ||
+        (Date.now() - tStart >= 29500);
+
+      if (isTimeout) {
+        const timeoutErr = new Error('Quá thời gian xử lý OCR (30 giây).');
+        (timeoutErr as any).isTimeout = true;
+        (timeoutErr as any).code = 'TIMEOUT';
+        throw timeoutErr;
+      }
+      throw err;
     }
-    return res;
   }
 
   static async getMultilineTrial(trialId: string): Promise<MultilineTrialResult> {
@@ -445,21 +578,59 @@ export class OcrPilotService {
 
 /**
  * Normalized user-facing error handler for handwriting OCR workflows.
- * Replaces cryptic AxiosError and HTTP status codes with kid-friendly Vietnamese messages.
+ * Categorizes and formats errors into friendly Vietnamese and English explanations.
  */
-export function normalizeOcrError(err: any): { title: string; message: string; technical?: string } {
+export function normalizeOcrError(err: any): { title: string; message: string; isTimeout?: boolean; technical?: string } {
   const status = err?.response?.status;
   const data = err?.response?.data;
   const backendCode = data?.error?.code || data?.code;
-  const technical = `status=${status || 'N/A'}, code=${backendCode || 'N/A'}, message=${err?.message || 'N/A'}`;
+  const isTimeout =
+    err?.isTimeout ||
+    err?.code === 'TIMEOUT' ||
+    err?.code === 'ECONNABORTED' ||
+    err?.message?.includes('timeout') ||
+    err?.name === 'AbortError';
 
-  if (status === 400) {
+  const technical = `status=${status || 'N/A'}, code=${backendCode || (isTimeout ? 'TIMEOUT' : 'N/A')}, message=${err?.message || 'N/A'}`;
+
+  // 1. Timeout Error
+  if (isTimeout) {
     return {
-      title: 'Chưa thể xử lý các dòng chữ',
-      message: 'Một số dòng chưa hợp lệ. Em hãy kiểm tra lại các khung chữ rồi thử tiếp.',
+      title: 'Hết thời gian chờ',
+      message: 'Nhận diện mất nhiều thời gian hơn dự kiến (quá thời gian chờ). Bạn có muốn thử lại không?',
+      isTimeout: true,
       technical,
     };
   }
+
+  // 2. Network Error
+  if (err?.message?.includes('Network Error') || err?.message?.includes('Network request failed') || !err?.response) {
+    return {
+      title: 'Lỗi kết nối OCR server',
+      message: 'Không thể kết nối OCR server. Kiểm tra backend hoặc mạng.',
+      technical,
+    };
+  }
+
+  // 3. Server Error (5xx)
+  if (status && status >= 500) {
+    return {
+      title: 'Lỗi máy chủ OCR',
+      message: `Máy chủ OCR đang gặp sự cố xử lý (mã lỗi ${status}). Vui lòng thử lại sau ít phút.`,
+      technical,
+    };
+  }
+
+  // 4. AI Processing / Validation Error (4xx)
+  if (status === 400 || status === 422) {
+    return {
+      title: 'Lỗi xử lý ảnh AI',
+      message: 'Không thể phân tích ảnh hoặc định dạng ảnh không hợp lệ. Em hãy kiểm tra lại ảnh chụp nhé.',
+      technical,
+    };
+  }
+
+  // 5. Auth error
   if (status === 401 || status === 403) {
     if (isHandAIMode()) {
       return {
@@ -470,10 +641,11 @@ export function normalizeOcrError(err: any): { title: string; message: string; t
     }
     return {
       title: 'Phiên đăng nhập hết hạn',
-      message: 'Phiên đăng nhập của em đã hết hạn. Vui lòng đăng nhập lại để tiếp tục.',
+      message: 'Phiên đăng nhập của em đã hết hạn. Vui lòng đăng nhập lại.',
       technical,
     };
   }
+
   if (status === 404) {
     return {
       title: 'Phiên nhận diện hết hạn',
@@ -481,32 +653,10 @@ export function normalizeOcrError(err: any): { title: string; message: string; t
       technical,
     };
   }
-  if (status && status >= 500) {
-    return {
-      title: 'Hệ thống đang bận',
-      message: 'Hệ thống đang bận. Vui lòng thử lại sau ít phút.',
-      technical,
-    };
-  }
-  if (err?.code === 'ECONNABORTED' || err?.message?.includes('timeout')) {
-    return {
-      title: 'Hết thời gian chờ',
-      message: 'Hệ thống phản hồi lâu hơn dự kiến. Em hãy kiểm tra mạng và thử lại nhé.',
-      technical,
-    };
-  }
-  if (err?.message?.includes('Network Error') || !err?.response) {
-    return {
-      title: 'Không thể kết nối',
-      message: 'Không thể kết nối đến hệ thống. Hãy kiểm tra mạng và thử lại.',
-      technical,
-    };
-  }
+
   return {
     title: 'Chưa thể nhận diện',
     message: 'Đã có lỗi xảy ra trong quá trình nhận diện. Em hãy thử lại nhé.',
     technical,
   };
 }
-
-

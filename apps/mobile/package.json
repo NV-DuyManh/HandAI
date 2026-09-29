@@ -47,7 +47,7 @@
   },
   "scripts": {
     "start": "expo start",
-    "start:device": "node -e \"console.warn('\\n[WARNING] start:device ONLY starts Metro Bundler. It DOES NOT start the Spring Boot or FastAPI backend. Use RUN_MATHVISION.bat to start the full local stack.\\n');\" && expo start --lan",
+    "start:device": "node -e \"console.warn('\\n[WARNING] start:device ONLY starts Metro Bundler. It DOES NOT start the Spring Boot or FastAPI backend. Use RUN_HANDAI.bat to start the full local stack.\\n');\" && expo start --lan",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",

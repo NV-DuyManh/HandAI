@@ -4,7 +4,7 @@ from pydantic import Field, AliasChoices
 from typing import Optional
 
 _SERVICE_DIR = Path(__file__).resolve().parent.parent
-_ENV_FILES = [str(_SERVICE_DIR / ".env"), ".env"]
+_ENV_FILES = [str(_SERVICE_DIR / ".env.local"), str(_SERVICE_DIR / ".env"), ".env.local", ".env"]
 
 class Settings(BaseSettings):
     app_env: str = "development"
