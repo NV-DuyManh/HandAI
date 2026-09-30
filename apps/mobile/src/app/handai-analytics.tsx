@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -10,42 +10,112 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { AppHeader } from '../components/ui/AppHeader';
+import {
+  MetricCard,
+  ReportCard,
+  SectionHeader,
+  ComparisonCard,
+  StatusBadge,
+  HistoryCard,
+  ErrorInsightCard,
+  TrendSparkline,
+} from '../components/report';
+import { handAiAnalyticsStore } from '../services/analytics/handAiAnalyticsStore';
+import {
+  buildHandAiDashboardMetrics,
+  type DashboardErrorItem,
+} from '../services/analytics/handAiDashboardMetrics';
+import { formatMetricPercent, formatSeconds } from '../utils/metricFormat';
+
+interface HistorySessionViewModel {
+  sessionId: string;
+  formattedSessionId: string;
+  date: string;
+  time: string;
+  sampleCount: string;
+  modelVersion: string;
+  rawOcrAccuracy?: number;
+  aiImprovement?: number;
+  duration: string;
+  status: string;
+  rawOcrPreview: string;
+  aiSuggestionPreview: string;
+  verifiedResultPreview: string;
+  detectedText: string;
+  confidence: number | string;
+  isSampleData: boolean;
+  imageThumbnailUri?: string;
+}
+
+const ERROR_LABELS: Record<DashboardErrorItem['errorType'], string> = {
+  NO_ERROR: 'No Error',
+  MISSING_CHARACTER: 'Missing Character Error',
+  EXTRA_CHARACTER: 'Extra Character Error',
+  VIETNAMESE_TONE_ERROR: 'Vietnamese Tone Error',
+  SIMILAR_CHARACTER_CONFUSION: 'Similar Character Confusion',
+  WORD_SUBSTITUTION: 'Word Substitution',
+  LOW_IMAGE_QUALITY: 'Image Quality Issue',
+  SEGMENTATION_FAILURE: 'Segmentation Failure',
+};
+
+const ERROR_COLORS: Record<DashboardErrorItem['errorType'], string> = {
+  NO_ERROR: '#059669',
+  MISSING_CHARACTER: '#DC2626',
+  EXTRA_CHARACTER: '#DC2626',
+  VIETNAMESE_TONE_ERROR: '#D97706',
+  SIMILAR_CHARACTER_CONFUSION: '#7C3AED',
+  WORD_SUBSTITUTION: '#7C3AED',
+  LOW_IMAGE_QUALITY: '#64748B',
+  SEGMENTATION_FAILURE: '#B91C1C',
+};
+
+const formatOptionalPercent = (value: number | null): string =>
+  value === null ? '—' : formatMetricPercent(value);
+
+const formatCountAndPercent = (count: number, total: number): string =>
+  total > 0 ? `${count} (${formatMetricPercent((count / total) * 100)})` : `${count}`;
 
 // -------------------------------------------------------------
-// V2.0 FINAL DEFENSE — MOBILE FIRST DESIGN TOKENS
+// SEMANTIC ACADEMIC DESIGN TOKENS (APPLE HIG + DEEPMIND)
 // -------------------------------------------------------------
-const COLORS = {
-  navy: '#0B192C',
-  navyLight: '#1E3A8A',
-  navySurface: '#EEF5FF',
-  navyBorder: '#BFDBFE',
+export const REPORT_THEME = {
+  // Semantic Colors
+  blue: '#2563EB',
+  blueDark: '#1D4ED8',
+  blueSurface: '#EFF6FF',
+  blueBorder: '#BFDBFE',
 
-  green: '#10B981',
-  greenDark: '#047857',
-  greenSurface: '#ECFDF5',
-  greenBorder: '#A7F3D0',
+  emerald: '#059669',
+  emeraldDark: '#047857',
+  emeraldSurface: '#ECFDF5',
+  emeraldBorder: '#A7F3D0',
+
+  purple: '#7C3AED',
+  purpleDark: '#6D28D9',
+  purpleSurface: '#F5F3FF',
+  purpleBorder: '#DDD6FE',
 
   amber: '#D97706',
   amberDark: '#B45309',
   amberSurface: '#FFFBEB',
   amberBorder: '#FDE68A',
 
-  red: '#EF4444',
+  red: '#DC2626',
+  redDark: '#B91C1C',
   redSurface: '#FEF2F2',
   redBorder: '#FECACA',
 
-  purple: '#7C3AED',
-  purpleSurface: '#F5F3FF',
-  purpleBorder: '#DDD6FE',
-
+  // Canvas & Surfaces
   bg: '#F8FAFC',
   cardBg: '#FFFFFF',
   cardBorder: '#E2E8F0',
 
+  // Typography
   textPrimary: '#0F172A',
-  textSecondary: '#475569',
+  textSecondary: '#334155',
   textMuted: '#64748B',
   textSubtle: '#94A3B8',
 
@@ -53,19 +123,107 @@ const COLORS = {
 };
 
 export default function HandAiAnalyticsScreen() {
+  const router = useRouter();
   const [refreshing, setRefreshing] = useState(false);
   const [appendixOpen, setAppendixOpen] = useState(false);
   const [datasetAccordionOpen, setDatasetAccordionOpen] = useState(false);
+  const [techArchOpen, setTechArchOpen] = useState(false);
   const { width } = useWindowDimensions();
 
   const isWide = width >= 768;
 
-  const onRefresh = async () => {
+  const [historySessions, setHistorySessions] = useState<HistorySessionViewModel[]>([]);
+  const [dashboardMetrics, setDashboardMetrics] = useState(() =>
+    buildHandAiDashboardMetrics([])
+  );
+
+  const loadDashboardData = useCallback(async () => {
+    await handAiAnalyticsStore.init();
+    const metrics = buildHandAiDashboardMetrics(handAiAnalyticsStore.getSessions());
+    const orderedSessions = [...metrics.sessions].sort((a, b) => b.timestamp - a.timestamp);
+
+    setDashboardMetrics(metrics);
+    setHistorySessions(
+      orderedSessions.map((session, index) => {
+        const sessionMetrics = buildHandAiDashboardMetrics([session]);
+
+        return {
+          sessionId: session.sessionId,
+          formattedSessionId:
+            session.formattedSessionId || `Recognition #${String(index + 1).padStart(3, '0')}`,
+          date: new Date(session.timestamp).toLocaleDateString('vi-VN'),
+          time: new Date(session.timestamp).toLocaleTimeString('vi-VN', {
+            hour: '2-digit',
+            minute: '2-digit',
+          }),
+          sampleCount: `${session.totalLines} lines processed`,
+          modelVersion: session.modelVersion || '',
+          rawOcrAccuracy: sessionMetrics.rawAccuracy ?? undefined,
+          aiImprovement: sessionMetrics.aiGain ?? undefined,
+          duration:
+            session.processingTimeSeconds != null
+              ? formatSeconds(session.processingTimeSeconds, '—')
+              : '—',
+          status: session.status,
+          rawOcrPreview:
+            session.rawOcrPreview ||
+            session.lineMetrics?.[0]?.ocrOutput ||
+            session.lineMetrics?.[0]?.ocrText ||
+            '',
+          aiSuggestionPreview:
+            session.aiSuggestionPreview ||
+            session.lineMetrics?.[0]?.aiCandidate ||
+            session.lineMetrics?.[0]?.aiSuggestion ||
+            '',
+          verifiedResultPreview:
+            session.verifiedResultPreview ||
+            session.lineMetrics?.[0]?.groundTruth ||
+            '',
+          detectedText:
+            session.detectedText ||
+            session.lineMetrics?.[0]?.finalText ||
+            session.lineMetrics?.[0]?.ocrOutput ||
+            '',
+          confidence: sessionMetrics.averageConfidence ?? '—',
+          isSampleData: false,
+          imageThumbnailUri:
+            session.imageThumbnailUri || session.thumbnailUri || session.imageUri || undefined,
+        };
+      })
+    );
+  }, []);
+
+  useEffect(() => {
+    if (process.env.NODE_ENV === 'test') return;
+
+    loadDashboardData().catch((error) => {
+      console.warn('Failed to load live HandAI analytics:', error);
+    });
+  }, [loadDashboardData]);
+
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    setTimeout(() => {
+    try {
+      await loadDashboardData();
+    } finally {
       setRefreshing(false);
-    }, 400);
-  };
+    }
+  }, [loadDashboardData]);
+
+  const dashboardErrors = useMemo(
+    () =>
+      dashboardMetrics.errorItems.map((error) => ({
+        id: error.id,
+        errorType: ERROR_LABELS[error.errorType],
+        name: ERROR_LABELS[error.errorType],
+        originalText: error.originalText,
+        suggestedText: error.suggestedText,
+        characterSnippet: error.characterSnippet,
+        explanation: 'This issue was recorded in a completed recognition session.',
+        color: ERROR_COLORS[error.errorType],
+      })),
+    [dashboardMetrics.errorItems]
+  );
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
@@ -80,12 +238,12 @@ export default function HandAiAnalyticsScreen() {
         <View style={[styles.mainWrapper, isWide && styles.mainWrapperWide]}>
           
           {/* ========================================================= */}
-          {/* 1. HEADER (FINAL DEFENSE COMPACT)                         */}
+          {/* RESEARCH PROVENANCE HEADER                                */}
           {/* ========================================================= */}
-          <View style={styles.headerBlock}>
+          <ReportCard style={styles.headerBlock} accentTopColor={REPORT_THEME.blueDark} accentTopWidth={4}>
             <View style={styles.headerTop}>
               <View style={styles.logoBadge}>
-                <Ionicons name="hardware-chip" size={20} color="#FFFFFF" />
+                <Ionicons name="hardware-chip-outline" size={22} color="#FFFFFF" />
               </View>
               <View style={styles.headerTitleWrap}>
                 <Text style={styles.headerTitle}>HandAI Research Dashboard</Text>
@@ -95,368 +253,317 @@ export default function HandAiAnalyticsScreen() {
               </View>
             </View>
 
-            {/* Badges Row */}
+            {/* Badges Row - Academic Identity */}
             <View style={styles.badgesRow}>
-              <View style={[styles.pillBadge, { backgroundColor: '#EFF6FF', borderColor: '#BFDBFE' }]}>
-                <Text style={[styles.pillBadgeText, { color: COLORS.navyLight }]}>FINAL DEFENSE</Text>
-              </View>
-              <View style={[styles.pillBadge, { backgroundColor: '#ECFDF5', borderColor: '#A7F3D0' }]}>
-                <View style={[styles.liveDot, { backgroundColor: COLORS.green }]} />
-                <Text style={[styles.pillBadgeText, { color: COLORS.greenDark }]}>ACTIVE MODEL</Text>
-              </View>
-              <View style={[styles.pillBadge, { backgroundColor: '#F8FAFC', borderColor: '#E2E8F0' }]}>
-                <Text style={[styles.pillBadgeText, { color: COLORS.textSecondary }]}>VERIFIED DATA</Text>
-              </View>
+              <StatusBadge label="Research Prototype" variant="blue" />
+              <StatusBadge label="CRNN + AI Correction" variant="purple" />
+              <StatusBadge label="Version 1.2" variant="neutral" />
             </View>
-          </View>
+          </ReportCard>
 
           {/* ========================================================= */}
-          {/* 2. HERO SUMMARY (4 KEY METRICS GRID 2x2)                  */}
+          {/* SECTION 1: SYSTEM PERFORMANCE (RESULT)                    */}
           {/* ========================================================= */}
-          <View style={styles.card}>
-            <View style={styles.sectionHeaderRow}>
-              <View style={styles.sectionTitleBlock}>
-                <Text style={styles.sectionLabel}>EXECUTIVE SUMMARY</Text>
-                <Text style={styles.sectionHeading}>HandAI System Overview</Text>
-              </View>
-              <View style={styles.heroSummaryPill}>
-                <Text style={styles.heroSummaryPillText}>V2.0 Certified</Text>
-              </View>
+          <ReportCard testID="performance-evaluation-section" delayMs={50}>
+            <SectionHeader
+              label="PERFORMANCE"
+              title="System Accuracy Evaluation"
+              description="Calculated from completed live recognition sessions with verified reference text."
+              rightElement={
+                <StatusBadge
+                  label={
+                    dashboardMetrics.hasEvaluatedLines
+                      ? `${dashboardMetrics.evaluatedLines} Verified Lines`
+                      : 'Awaiting Verified Data'
+                  }
+                  variant={dashboardMetrics.hasEvaluatedLines ? 'green' : 'neutral'}
+                  showDot={dashboardMetrics.hasEvaluatedLines}
+                />
+              }
+            />
+
+            {/* PRIMARY METRIC: Dominant Card Height & Large 36px Number */}
+            <MetricCard
+              isPrimary
+              value={formatOptionalPercent(dashboardMetrics.finalAccuracy)}
+              title="Verified Line Accuracy"
+              explanation={
+                dashboardMetrics.hasEvaluatedLines
+                  ? `${dashboardMetrics.finalCorrectLines}/${dashboardMetrics.evaluatedLines} verified lines matched the reference`
+                  : 'Complete and verify a recognition session to calculate this metric'
+              }
+              color="blue"
+              icon="checkmark-circle-outline"
+              categoryTag="PRIMARY SYSTEM METRIC"
+              delayMs={100}
+            />
+
+            {/* SUPPORTING METRICS (Exactly 2-Column Grid Layout) */}
+            <View style={styles.supportingMetricsGrid}>
+              {/* Supporting 1: Character Accuracy (Column 1) */}
+              <MetricCard
+                value={formatOptionalPercent(dashboardMetrics.characterAccuracy)}
+                title="Raw OCR Character Accuracy"
+                explanation={
+                  dashboardMetrics.cer === null
+                    ? 'CER requires verified reference text'
+                    : `100 - corpus CER (${formatMetricPercent(dashboardMetrics.cer)})`
+                }
+                color="green"
+                icon="analytics-outline"
+                categoryTag="CHAR LEVEL"
+                style={styles.supportingColCard}
+                delayMs={150}
+              />
+
+              {/* Supporting 2: Word Accuracy (Column 2) */}
+              <MetricCard
+                value={formatOptionalPercent(dashboardMetrics.wordAccuracy)}
+                title="Raw OCR Word Accuracy"
+                explanation={
+                  dashboardMetrics.wer === null
+                    ? 'WER requires verified reference text'
+                    : `100 - corpus WER (${formatMetricPercent(dashboardMetrics.wer)})`
+                }
+                color="purple"
+                icon="document-text-outline"
+                categoryTag="WORD LEVEL"
+                style={styles.supportingColCard}
+                delayMs={200}
+              />
+
+              {/* Supporting 3: AI Improvement (Purple/Indigo Semantic) */}
+              <MetricCard
+                value={
+                  dashboardMetrics.aiGain === null
+                    ? '—'
+                    : `${dashboardMetrics.aiGain > 0 ? '+' : ''}${dashboardMetrics.aiGain} pp`
+                }
+                title="Assisted Workflow Improvement"
+                explanation="Verified line-accuracy change from raw OCR to the selected final text after correction and review"
+                color="purple"
+                icon="sparkles-outline"
+                categoryTag="WORKFLOW GAIN"
+                style={styles.supportingSpanCard}
+                delayMs={250}
+              />
             </View>
-
-            <Text style={styles.heroIntroText}>
-              AI-powered OCR system combining CRNN recognition and Vietnamese language correction.
-            </Text>
-
-            {/* 4 Metric Cards in 2x2 Grid */}
-            <View style={styles.heroGrid}>
-              {/* Card 1: Recognition Accuracy (System Evaluation) */}
-              <View style={[styles.heroMetricCard, { backgroundColor: '#F0FDF4', borderColor: COLORS.greenBorder }]}>
-                <View style={styles.heroCardTop}>
-                  <Text style={[styles.heroMetricCategory, { color: COLORS.greenDark }]}>SYSTEM EVAL</Text>
-                  <Ionicons name="checkmark-circle" size={16} color={COLORS.green} />
-                </View>
-                <Text style={[styles.heroMetricNumber, { color: COLORS.greenDark }]}>88.2%</Text>
-                <Text style={styles.heroMetricTitle}>Recognition Accuracy (System Evaluation)</Text>
-                <Text style={styles.heroMetricSub}>CRNN inference on handwriting corpus</Text>
-              </View>
-
-              {/* Card 2: Baseline Improvement (Before vs After AI Correction) */}
-              <View style={[styles.heroMetricCard, { backgroundColor: '#FFFBEB', borderColor: COLORS.amberBorder }]}>
-                <View style={styles.heroCardTop}>
-                  <Text style={[styles.heroMetricCategory, { color: COLORS.amberDark }]}>IMPACT GAIN</Text>
-                  <Ionicons name="trending-up" size={16} color={COLORS.amber} />
-                </View>
-                <Text style={[styles.heroMetricNumber, { color: COLORS.amberDark }]}>+37%</Text>
-                <Text style={styles.heroMetricTitle}>Baseline Improvement (Before vs After AI Correction)</Text>
-                <Text style={styles.heroMetricSub}>Accuracy jump from 63% to 100%</Text>
-              </View>
-
-              {/* Card 3: Global Char Accuracy */}
-              <View style={[styles.heroMetricCard, { backgroundColor: '#EFF6FF', borderColor: COLORS.navyBorder }]}>
-                <View style={styles.heroCardTop}>
-                  <Text style={[styles.heroMetricCategory, { color: COLORS.navyLight }]}>CHAR LEVEL</Text>
-                  <Ionicons name="analytics" size={16} color={COLORS.navyLight} />
-                </View>
-                <Text style={[styles.heroMetricNumber, { color: COLORS.navyLight }]}>97.6%</Text>
-                <Text style={styles.heroMetricTitle}>Global Char Accuracy</Text>
-                <Text style={styles.heroMetricSub}>100 - CER (Character Error Rate: 2.4%)</Text>
-              </View>
-
-              {/* Card 4: Global Word Accuracy */}
-              <View style={[styles.heroMetricCard, { backgroundColor: '#EFF6FF', borderColor: COLORS.navyBorder }]}>
-                <View style={styles.heroCardTop}>
-                  <Text style={[styles.heroMetricCategory, { color: COLORS.navyLight }]}>WORD LEVEL</Text>
-                  <Ionicons name="text" size={16} color={COLORS.navyLight} />
-                </View>
-                <Text style={[styles.heroMetricNumber, { color: COLORS.navyLight }]}>94.1%</Text>
-                <Text style={styles.heroMetricTitle}>Global Word Accuracy</Text>
-                <Text style={styles.heroMetricSub}>100 - WER (Word Error Rate: 5.9%)</Text>
-              </View>
-            </View>
-          </View>
-
-          {/* ========================================================= */}
-          {/* 3. EVALUATION SUMMARY (COMPACT 2-COL LIST)                */}
-          {/* ========================================================= */}
-          <View style={styles.card}>
-            <View style={styles.sectionHeaderRow}>
-              <View style={styles.sectionTitleBlock}>
-                <Text style={styles.sectionLabel}>SESSION BENCHMARK</Text>
-                <Text style={styles.sectionHeading}>Evaluation Summary</Text>
-              </View>
-              <Text style={styles.evalBatchTag}>500 Sample Benchmark</Text>
-            </View>
-
-            <View style={styles.evalGrid}>
-              <View style={styles.evalRow}>
-                <Text style={styles.evalLabel}>Total lines</Text>
-                <Text style={styles.evalValue}>500 lines</Text>
-              </View>
-              <View style={styles.evalRow}>
-                <Text style={styles.evalLabel}>Correct OCR lines</Text>
-                <Text style={[styles.evalValue, { color: COLORS.textSecondary }]}>315 (63.0%)</Text>
-              </View>
-              <View style={styles.evalRow}>
-                <Text style={styles.evalLabel}>AI corrected lines</Text>
-                <Text style={[styles.evalValue, { color: COLORS.greenDark }]}>185 (37.0%)</Text>
-              </View>
-              <View style={styles.evalRow}>
-                <Text style={styles.evalLabel}>Manual edited lines</Text>
-                <Text style={styles.evalValue}>0 (0.0%)</Text>
-              </View>
-              <View style={styles.evalRow}>
-                <Text style={styles.evalLabel}>Final correct lines</Text>
-                <Text style={[styles.evalValue, { color: COLORS.greenDark, fontWeight: '800' }]}>500 (100%)</Text>
-              </View>
-              <View style={styles.evalRow}>
-                <Text style={styles.evalLabel}>Latency</Text>
-                <Text style={styles.evalValue}>2.3s / image</Text>
-              </View>
-              <View style={[styles.evalRow, { borderBottomWidth: 0 }]}>
-                <Text style={styles.evalLabel}>Average model confidence</Text>
-                <Text style={[styles.evalValue, { color: COLORS.navyLight }]}>91.4%</Text>
-              </View>
-            </View>
-          </View>
+          </ReportCard>
 
           {/* ========================================================= */}
-          {/* 4. MODEL ARCHITECTURE (MOBILE VERTICAL STEPPER)           */}
+          {/* SECTION 2: ASSISTED WORKFLOW IMPACT                       */}
           {/* ========================================================= */}
-          <View style={styles.card}>
-            <View style={styles.sectionHeaderRow}>
-              <View style={styles.sectionTitleBlock}>
-                <Text style={styles.sectionLabel}>PIPELINE WORKFLOW</Text>
-                <Text style={styles.sectionHeading}>Model Architecture</Text>
-              </View>
-              <View style={styles.techTag}>
-                <Text style={styles.techTagText}>CRNN + PyTorch</Text>
-              </View>
-            </View>
+          <ReportCard testID="ai-contribution-section" borderColor={REPORT_THEME.purpleBorder} delayMs={100}>
+            <SectionHeader
+              label="ASSISTED WORKFLOW IMPACT"
+              title="Assistance and Review Impact"
+              labelColor={REPORT_THEME.purpleDark}
+              description="Measured on the same verified lines before correction and after the final user-selected result."
+              rightElement={
+                <StatusBadge
+                  label={
+                    dashboardMetrics.aiGain === null
+                      ? 'No Verified Comparison'
+                      : `${dashboardMetrics.aiGain > 0 ? '+' : ''}${dashboardMetrics.aiGain} pp`
+                  }
+                  variant={dashboardMetrics.aiGain === null ? 'neutral' : 'purple'}
+                  showDot={dashboardMetrics.aiGain !== null}
+                />
+              }
+            />
 
-            {/* Vertical Stepper Container */}
-            <View style={styles.stepperContainer}>
-              {/* Step 1 */}
-              <View style={styles.stepItem}>
-                <View style={styles.stepTrackCol}>
-                  <View style={styles.stepCircle}>
-                    <Text style={styles.stepCircleNum}>1</Text>
-                  </View>
-                  <View style={styles.stepLine} />
-                </View>
-                <View style={styles.stepCardContent}>
-                  <View style={styles.stepHeaderRow}>
-                    <Ionicons name="image-outline" size={16} color={COLORS.navyLight} />
-                    <Text style={styles.stepTitle}>Input Image</Text>
-                  </View>
-                  <Text style={styles.stepSubtitle}>Single line handwriting crop</Text>
-                </View>
+            {dashboardMetrics.hasEvaluatedLines ? (
+              <ComparisonCard
+                rawOcrLabel="RAW OCR BASELINE"
+                rawOcrValue={formatOptionalPercent(dashboardMetrics.rawAccuracy)}
+                aiImprovementLabel="CORRECTION + REVIEW CONTRIBUTION"
+                aiImprovementValue={`${dashboardMetrics.aiGain || 0}%`}
+                gainUnit="percentagePoints"
+                verifiedOutcomeLabel="VERIFIED RESULT"
+                verifiedOutcomeValue={formatOptionalPercent(dashboardMetrics.finalAccuracy)}
+                contributionDescription="AI correction and user review reflected in the selected final text"
+                formulaContributionLabel="Correction + Review Change"
+                formulaResultLabel="Verified Final Outcome"
+                footnote={`Computed from ${dashboardMetrics.evaluatedLines} verified lines in ${dashboardMetrics.totalSessions} live session${dashboardMetrics.totalSessions === 1 ? '' : 's'}.`}
+                testID="ai-assistance-comparison-card"
+              />
+            ) : (
+              <View style={styles.noDataBox} testID="ai-assistance-empty-state">
+                <Ionicons name="analytics-outline" size={24} color={REPORT_THEME.purpleDark} />
+                <Text style={styles.noDataTitle}>No verified comparison yet</Text>
+                <Text style={styles.noDataText}>
+                  Confirm at least one recognition result with reference text to measure raw OCR and assisted output on the same lines.
+                </Text>
               </View>
+            )}
 
-              {/* Step 2 */}
-              <View style={styles.stepItem}>
-                <View style={styles.stepTrackCol}>
-                  <View style={styles.stepCircle}>
-                    <Text style={styles.stepCircleNum}>2</Text>
-                  </View>
-                  <View style={styles.stepLine} />
-                </View>
-                <View style={styles.stepCardContent}>
-                  <View style={styles.stepHeaderRow}>
-                    <Ionicons name="scan-outline" size={16} color={COLORS.navyLight} />
-                    <Text style={styles.stepTitle}>Feature Extraction (CNN)</Text>
-                  </View>
-                  <Text style={styles.stepSubtitle}>Spatial visual feature maps</Text>
-                </View>
-              </View>
-
-              {/* Step 3 */}
-              <View style={styles.stepItem}>
-                <View style={styles.stepTrackCol}>
-                  <View style={styles.stepCircle}>
-                    <Text style={styles.stepCircleNum}>3</Text>
-                  </View>
-                  <View style={styles.stepLine} />
-                </View>
-                <View style={styles.stepCardContent}>
-                  <View style={styles.stepHeaderRow}>
-                    <Ionicons name="repeat-outline" size={16} color={COLORS.navyLight} />
-                    <Text style={styles.stepTitle}>Sequence Modeling (BiLSTM)</Text>
-                  </View>
-                  <Text style={styles.stepSubtitle}>Bidirectional contextual RNN</Text>
-                </View>
-              </View>
-
-              {/* Step 4 */}
-              <View style={styles.stepItem}>
-                <View style={styles.stepTrackCol}>
-                  <View style={styles.stepCircle}>
-                    <Text style={styles.stepCircleNum}>4</Text>
-                  </View>
-                  <View style={styles.stepLine} />
-                </View>
-                <View style={styles.stepCardContent}>
-                  <View style={styles.stepHeaderRow}>
-                    <Ionicons name="code-working-outline" size={16} color={COLORS.navyLight} />
-                    <Text style={styles.stepTitle}>CTC Decoding</Text>
-                  </View>
-                  <Text style={styles.stepSubtitle}>Connectionist temporal classification</Text>
-                </View>
-              </View>
-
-              {/* Step 5: AI Correction Layer (Highlighted) */}
-              <View style={styles.stepItem}>
-                <View style={styles.stepTrackCol}>
-                  <View style={[styles.stepCircle, styles.stepCircleGreen]}>
-                    <Ionicons name="sparkles" size={12} color="#FFFFFF" />
-                  </View>
-                  <View style={styles.stepLine} />
-                </View>
-                <View style={[styles.stepCardContent, styles.stepCardGreen]}>
-                  <View style={styles.stepHeaderRow}>
-                    <Text style={[styles.stepTitle, { color: COLORS.greenDark, fontWeight: '800' }]}>
-                      AI Correction Layer
-                    </Text>
-                    <View style={styles.postProcessingPill}>
-                      <Text style={styles.postProcessingText}>POST-PROCESS</Text>
-                    </View>
-                  </View>
-                  <Text style={[styles.stepSubtitle, { color: '#166534', fontWeight: '500' }]}>
-                    Vietnamese Language Context Post-processing
-                  </Text>
-                </View>
-              </View>
-
-              {/* Step 6: Final Output */}
-              <View style={[styles.stepItem, { marginBottom: 0 }]}>
-                <View style={styles.stepTrackCol}>
-                  <View style={[styles.stepCircle, styles.stepCircleNavy]}>
-                    <Ionicons name="checkmark" size={12} color="#FFFFFF" />
-                  </View>
-                </View>
-                <View style={[styles.stepCardContent, styles.stepCardNavy]}>
-                  <View style={styles.stepHeaderRow}>
-                    <Text style={[styles.stepTitle, { color: '#FFFFFF' }]}>Final Output</Text>
-                  </View>
-                  <Text style={[styles.stepSubtitle, { color: '#94A3B8' }]}>
-                    Accurate verified Vietnamese sentence
-                  </Text>
-                </View>
-              </View>
-            </View>
-          </View>
+            {/* AI Improvement Trend Sparkline (Real data only or truthful unavailable notice) */}
+            <TrendSparkline
+              title="Workflow Improvement Trend"
+              subtitle="Verified line-accuracy gains across completed live sessions"
+              gainUnit="percentagePoints"
+              runs={
+                historySessions && historySessions.length >= 2
+                  ? historySessions
+                      .filter((s) => s.status === 'COMPLETED' && s.aiImprovement != null)
+                      .slice(0, 3)
+                      .map((s, idx, arr) => ({
+                        runLabel: `Run ${String(idx + 1).padStart(2, '0')}`,
+                        gainPercent: Number(s.aiImprovement) || 0,
+                        model: s.modelVersion || 'CRNN-v1.2',
+                        isLatest: idx === arr.length - 1,
+                      }))
+                  : []
+              }
+              style={{ marginTop: 14 }}
+            />
+          </ReportCard>
 
           {/* ========================================================= */}
-          {/* 5. AI CONTRIBUTION (BEFORE / AFTER COMPARISON)            */}
+          {/* SECTION 3: DATA EVIDENCE (DATASET CORPUS & BENCHMARK)     */}
           {/* ========================================================= */}
-          <View style={[styles.card, { borderColor: COLORS.greenBorder }]}>
-            <View style={styles.sectionHeaderRow}>
-              <View style={styles.sectionTitleBlock}>
-                <Text style={[styles.sectionLabel, { color: COLORS.greenDark }]}>CORE SCIENTIFIC VALUE</Text>
-                <Text style={styles.sectionHeading}>AI Contribution Analysis</Text>
-              </View>
-              <View style={styles.gainTagPill}>
-                <Text style={styles.gainTagPillText}>+37% Gain</Text>
-              </View>
-            </View>
-
-            {/* Before vs After Cards */}
-            <View style={styles.compareBlock}>
-              <View style={styles.compareRowItem}>
-                <View style={styles.compareColBefore}>
-                  <Text style={styles.compareSubTag}>BEFORE AI</Text>
-                  <Text style={styles.compareModelName}>Raw CRNN OCR</Text>
-                  <Text style={styles.compareAccuracyNumber}>63%</Text>
-                  <Text style={styles.compareBadge}>Baseline Evaluation</Text>
+          <ReportCard testID="dataset-statistics-section" delayMs={150}>
+            <SectionHeader
+              label="DATA EVIDENCE"
+              title="Live Evaluation Overview"
+              description="Counts and metrics from completed recognition sessions stored on this device."
+              rightElement={
+                <View style={styles.datasetBadgesGroup}>
+                  <StatusBadge
+                    label={dashboardMetrics.hasLiveSessions ? 'Live Sessions' : 'No Live Sessions'}
+                    variant={dashboardMetrics.hasLiveSessions ? 'green' : 'neutral'}
+                    showDot={dashboardMetrics.hasLiveSessions}
+                  />
+                  <StatusBadge label="Sample Data Excluded" variant="blue" />
                 </View>
-
-                <View style={styles.compareArrowBox}>
-                  <Ionicons name="arrow-forward" size={16} color={COLORS.greenDark} />
-                  <Text style={styles.arrowGainText}>+37%</Text>
-                </View>
-
-                <View style={styles.compareColAfter}>
-                  <Text style={[styles.compareSubTag, { color: COLORS.greenDark }]}>AFTER AI</Text>
-                  <Text style={[styles.compareModelName, { color: COLORS.greenDark }]}>CRNN + AI Correction</Text>
-                  <Text style={[styles.compareAccuracyNumber, { color: COLORS.greenDark }]}>100%</Text>
-                  <Text style={[styles.compareBadge, { backgroundColor: '#DCFCE7', color: '#166534' }]}>
-                    Evaluation Batch Result
-                  </Text>
-                </View>
-              </View>
-
-              {/* 3 Micro Stats */}
-              <View style={styles.miniStatsRow}>
-                <View style={styles.miniStatBox}>
-                  <Text style={styles.miniStatVal}>+37%</Text>
-                  <Text style={styles.miniStatLabel}>Accuracy Gain</Text>
-                </View>
-                <View style={styles.miniStatBox}>
-                  <Text style={styles.miniStatVal}>100%</Text>
-                  <Text style={styles.miniStatLabel}>Error Recovery Rate</Text>
-                </View>
-                <View style={styles.miniStatBox}>
-                  <Text style={styles.miniStatVal}>185/185</Text>
-                  <Text style={styles.miniStatLabel}>Rescued Samples</Text>
-                </View>
-              </View>
-
-              <Text style={styles.academicFootnote}>
-                “Measured on manually verified evaluation samples, not the complete dataset.”
-              </Text>
-            </View>
-          </View>
-
-          {/* ========================================================= */}
-          {/* 6. DATASET SECTION                                        */}
-          {/* ========================================================= */}
-          <View style={styles.card}>
-            <View style={styles.sectionHeaderRow}>
-              <View style={styles.sectionTitleBlock}>
-                <Text style={styles.sectionLabel}>TRAINING & EVALUATION DATA</Text>
-                <Text style={styles.sectionHeading}>Dataset Overview</Text>
-              </View>
-              <View style={styles.datasetBadgesGroup}>
-                <View style={styles.verifiedTag}>
-                  <Ionicons name="checkmark-circle" size={12} color={COLORS.green} style={{ marginRight: 2 }} />
-                  <Text style={styles.verifiedTagText}>Verified</Text>
-                </View>
-                <View style={styles.versionTag}>
-                  <Text style={styles.versionTagText}>HandAI-v1.2</Text>
-                </View>
-              </View>
-            </View>
+              }
+            />
 
             <View style={styles.datasetInfoContainer}>
-              <Text style={styles.datasetNameHeading}>Viet-Handwriting-OCR-v2</Text>
-              <Text style={styles.datasetTotalText}>59,747 Total Handwriting Samples</Text>
+              <Text style={styles.datasetNameHeading}>On-device recognition history</Text>
+              <Text style={styles.datasetTotalText}>
+                {dashboardMetrics.totalLines} processed lines across {dashboardMetrics.totalSessions} completed sessions
+              </Text>
 
-              {/* 2 Blocks: Training Corpus vs Evaluation Benchmark */}
+              {/* 2 Blocks: Processed lines vs lines with usable reference text */}
               <View style={styles.datasetSplitCardsRow}>
                 <View style={styles.corpusCard}>
-                  <Text style={styles.corpusCardLabel}>Training Corpus</Text>
-                  <Text style={styles.corpusCardNumber}>59,462</Text>
-                  <Text style={styles.corpusCardSub}>samples (99.16%)</Text>
+                  <Text style={styles.corpusCardLabel}>Processed Lines</Text>
+                  <Text style={styles.corpusCardNumber}>{dashboardMetrics.totalLines}</Text>
+                  <Text style={styles.corpusCardSub}>from real completed sessions</Text>
                 </View>
 
-                <View style={[styles.corpusCard, { borderColor: COLORS.greenBorder, backgroundColor: '#F0FDF4' }]}>
-                  <Text style={[styles.corpusCardLabel, { color: COLORS.greenDark }]}>Evaluation Benchmark</Text>
-                  <Text style={[styles.corpusCardNumber, { color: COLORS.greenDark }]}>500</Text>
-                  <Text style={[styles.corpusCardSub, { color: '#166534' }]}>manually verified samples (0.84%)</Text>
+                <View style={[styles.corpusCard, styles.corpusCardBenchmark]}>
+                  <Text style={[styles.corpusCardLabel, { color: REPORT_THEME.emeraldDark }]}>
+                    Evaluated Lines
+                  </Text>
+                  <Text style={[styles.corpusCardNumber, { color: REPORT_THEME.emeraldDark }]}>
+                    {dashboardMetrics.evaluatedLines}
+                  </Text>
+                  <Text style={[styles.corpusCardSub, { color: '#166534' }]}>
+                    with explicit or user-confirmed reference text
+                  </Text>
                 </View>
               </View>
 
-              {/* Progress Split Bar */}
-              <View style={styles.datasetBarTrack}>
-                <View style={[styles.datasetBarFill, { flex: 59462, backgroundColor: COLORS.navyLight }]} />
-                <View style={[styles.datasetBarFill, { flex: 500, backgroundColor: COLORS.green }]} />
+              {dashboardMetrics.totalLines > 0 ? (
+                <View style={styles.datasetBarTrack}>
+                  <View
+                    style={[
+                      styles.datasetBarFill,
+                      {
+                        flex: Math.max(0, dashboardMetrics.totalLines - dashboardMetrics.evaluatedLines),
+                        backgroundColor: REPORT_THEME.blueDark,
+                      },
+                    ]}
+                  />
+                  <View
+                    style={[
+                      styles.datasetBarFill,
+                      {
+                        flex: dashboardMetrics.evaluatedLines,
+                        backgroundColor: REPORT_THEME.emerald,
+                      },
+                    ]}
+                  />
+                </View>
+              ) : null}
+
+              {/* Secondary Dataset Stats: Total evaluation sessions & Total evaluated samples */}
+              <View style={styles.datasetSecondaryStatsRow}>
+                <View style={styles.datasetSecondaryStatItem}>
+                  <Text style={styles.datasetSecondaryStatLabel}>Total evaluation sessions</Text>
+                  <Text style={styles.datasetSecondaryStatVal}>
+                    {dashboardMetrics.totalSessions} sessions
+                  </Text>
+                </View>
+                <View style={styles.datasetSecondaryStatDivider} />
+                <View style={styles.datasetSecondaryStatItem}>
+                  <Text style={styles.datasetSecondaryStatLabel}>Total evaluated samples</Text>
+                  <Text style={styles.datasetSecondaryStatVal}>
+                    {dashboardMetrics.evaluatedLines} lines
+                  </Text>
+                </View>
               </View>
 
               <Text style={styles.benchmarkNote}>
-                “Evaluation samples are manually verified benchmark cases used for final performance assessment.”
+                Metrics use completed non-sample sessions only. Lines without explicit or user-confirmed reference text remain in the processed count but are excluded from accuracy, CER and WER.
               </Text>
 
-              {/* Collapsible Accordion for Auxiliary Details */}
+              {/* Session Benchmark / Evaluation Summary Sub-Table */}
+              <View style={styles.evalSummaryContainer}>
+                <View style={styles.evalSummaryHeaderRow}>
+                  <Text style={styles.evalSummaryTitle}>Evaluation Summary</Text>
+                  <Text style={styles.evalBatchTag}>{dashboardMetrics.evaluatedLines} verified lines</Text>
+                </View>
+
+                <View style={styles.evalGrid}>
+                  <View style={styles.evalRow}>
+                    <Text style={styles.evalLabel}>Total lines</Text>
+                    <Text style={styles.evalValue}>{dashboardMetrics.totalLines} lines</Text>
+                  </View>
+                  <View style={styles.evalRow}>
+                    <Text style={styles.evalLabel}>Correct OCR lines</Text>
+                    <Text style={[styles.evalValue, { color: REPORT_THEME.textSecondary }]}>
+                      {formatCountAndPercent(dashboardMetrics.rawCorrectLines, dashboardMetrics.evaluatedLines)}
+                    </Text>
+                  </View>
+                  <View style={styles.evalRow}>
+                    <Text style={styles.evalLabel}>AI assisted lines</Text>
+                    <Text style={[styles.evalValue, { color: REPORT_THEME.emeraldDark }]}>
+                      {formatCountAndPercent(dashboardMetrics.aiAssistedLines, dashboardMetrics.evaluatedLines)}
+                    </Text>
+                  </View>
+                  <View style={styles.evalRow}>
+                    <Text style={styles.evalLabel}>Manual edited lines</Text>
+                    <Text style={styles.evalValue}>
+                      {formatCountAndPercent(dashboardMetrics.manualEditedLines, dashboardMetrics.evaluatedLines)}
+                    </Text>
+                  </View>
+                  <View style={styles.evalRow}>
+                    <Text style={styles.evalLabel}>Verified correct lines</Text>
+                    <Text style={[styles.evalValue, { color: REPORT_THEME.emeraldDark, fontWeight: '800' }]}>
+                      {formatCountAndPercent(dashboardMetrics.finalCorrectLines, dashboardMetrics.evaluatedLines)}
+                    </Text>
+                  </View>
+                  <View style={styles.evalRow}>
+                    <Text style={styles.evalLabel}>Latency</Text>
+                    <Text style={styles.evalValue}>
+                      {dashboardMetrics.averageLatencySeconds === null
+                        ? '—'
+                        : `${formatSeconds(dashboardMetrics.averageLatencySeconds, '—')} / session`}
+                    </Text>
+                  </View>
+                  <View style={[styles.evalRow, { borderBottomWidth: 0 }]}>
+                    <Text style={styles.evalLabel}>Average model confidence</Text>
+                    <Text style={[styles.evalValue, { color: REPORT_THEME.blueDark }]}>
+                      {formatOptionalPercent(dashboardMetrics.averageConfidence)}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+
+              {/* Collapsible Accordion for Auxiliary Integrity Details */}
               <TouchableOpacity
                 style={styles.accordionToggleBtn}
                 onPress={() => setDatasetAccordionOpen(!datasetAccordionOpen)}
@@ -465,140 +572,292 @@ export default function HandAiAnalyticsScreen() {
                 accessibilityLabel="Toggle dataset integrity details"
               >
                 <Text style={styles.accordionToggleText}>
-                  {datasetAccordionOpen ? 'Hide Data Integrity Details' : 'View Data Integrity & Privacy Profile'}
+                  {datasetAccordionOpen ? 'Hide Metric Provenance' : 'View Metric Provenance'}
                 </Text>
                 <Ionicons
                   name={datasetAccordionOpen ? 'chevron-up' : 'chevron-down'}
                   size={14}
-                  color={COLORS.navyLight}
+                  color={REPORT_THEME.blueDark}
                 />
               </TouchableOpacity>
 
               {datasetAccordionOpen && (
                 <View style={styles.accordionContentBox}>
                   <View style={styles.accordionRow}>
-                    <Text style={styles.accordionKey}>Deduplication:</Text>
-                    <Text style={styles.accordionVal}>0.4% duplicate rate (pHash/SHA-256 audited)</Text>
+                    <Text style={styles.accordionKey}>Session filter:</Text>
+                    <Text style={styles.accordionVal}>Completed live sessions; sample records excluded</Text>
                   </View>
                   <View style={styles.accordionRow}>
-                    <Text style={styles.accordionKey}>Privacy Handling:</Text>
-                    <Text style={styles.accordionVal}>PII Masking Active, zero student identifiers retained</Text>
+                    <Text style={styles.accordionKey}>Reference coverage:</Text>
+                    <Text style={styles.accordionVal}>
+                      {dashboardMetrics.evaluatedLines}/{dashboardMetrics.totalLines} processed lines
+                    </Text>
                   </View>
                   <View style={[styles.accordionRow, { borderBottomWidth: 0 }]}>
-                    <Text style={styles.accordionKey}>Partitioning:</Text>
-                    <Text style={styles.accordionVal}>Disjoint writer splits (Seed: 42)</Text>
+                    <Text style={styles.accordionKey}>Persistence:</Text>
+                    <Text style={styles.accordionVal}>Device recognition history store</Text>
                   </View>
                 </View>
               )}
             </View>
-          </View>
+          </ReportCard>
 
           {/* ========================================================= */}
-          {/* 7. ERROR ANALYSIS (4 MODES + SAMPLE VISUALIZATION)         */}
+          {/* SECTION: RECOGNITION HISTORY (PREVIOUS RECOGNITION LOOKUP)*/}
           {/* ========================================================= */}
-          <View style={styles.card}>
-            <View style={styles.sectionHeaderRow}>
-              <View style={styles.sectionTitleBlock}>
-                <Text style={styles.sectionLabel}>FAILURE MODE CLASSIFICATION</Text>
-                <Text style={styles.sectionHeading}>Error Analysis & Mitigation</Text>
-              </View>
-              <Text style={styles.errorSummaryTag}>4 Failure Modes</Text>
+          <ReportCard testID="evaluation-history-section" delayMs={180}>
+            <SectionHeader
+              label="RECOGNITION HISTORY"
+              title="Recognition History"
+              description="Look up previous handwriting recognition results."
+              rightElement={<StatusBadge label={`${historySessions.length} Results`} variant="blue" />}
+            />
+
+            <View style={styles.historyList}>
+              {historySessions.length > 0 ? (
+                historySessions.map((session) => (
+                  <HistoryCard
+                    key={session.sessionId}
+                    sessionId={session.formattedSessionId}
+                    date={session.date}
+                    time={session.time}
+                    imageThumbnailUri={session.imageThumbnailUri}
+                    detectedText={session.detectedText}
+                    rawOcrPreview={session.rawOcrPreview}
+                    aiSuggestionPreview={session.aiSuggestionPreview}
+                    verifiedResultPreview={session.verifiedResultPreview}
+                    confidence={session.confidence}
+                    modelVersion={session.modelVersion}
+                    rawOcrAccuracy={session.rawOcrAccuracy}
+                    aiImprovement={session.aiImprovement}
+                    improvementLabel="Workflow Gain"
+                    sampleCount={session.sampleCount}
+                    duration={session.duration}
+                    isSampleData={session.isSampleData}
+                    onPress={() =>
+                      router.push({
+                        pathname: '/handai-trial-analytics',
+                        params: { trialId: session.sessionId },
+                      })
+                    }
+                    testID={`history-card-${session.sessionId}`}
+                  />
+                ))
+              ) : (
+                <View style={styles.noDataBox} testID="recognition-history-empty-state">
+                  <Ionicons name="time-outline" size={24} color={REPORT_THEME.blueDark} />
+                  <Text style={styles.noDataTitle}>No live recognition history</Text>
+                  <Text style={styles.noDataText}>
+                    Completed recognition sessions will appear here. Built-in sample sessions are excluded.
+                  </Text>
+                </View>
+              )}
             </View>
 
-            {/* Visual Sample Transformation Box */}
-            <View style={styles.visualSampleBox}>
-              <Text style={styles.visualSampleLabel}>Sample Visualization (Benchmark Case)</Text>
-              <View style={styles.visualSamplePipeline}>
-                <View style={styles.sampleStep}>
-                  <Text style={styles.sampleStepTitle}>Original Handwriting</Text>
-                  <View style={styles.sampleImageBox}>
-                    <Text style={styles.sampleHandwritingText}>"Em hái sim ăn"</Text>
-                  </View>
-                </View>
-                <Ionicons name="arrow-down" size={14} color={COLORS.textSubtle} style={{ marginVertical: 4 }} />
-                <View style={styles.sampleStep}>
-                  <Text style={styles.sampleStepTitle}>Raw OCR Result (Missing 's')</Text>
-                  <View style={[styles.sampleImageBox, { backgroundColor: '#FEF2F2', borderColor: '#FECACA' }]}>
-                    <Text style={[styles.sampleResultText, { color: '#DC2626' }]}>"Em hái im ăn"</Text>
-                  </View>
-                </View>
-                <Ionicons name="arrow-down" size={14} color={COLORS.textSubtle} style={{ marginVertical: 4 }} />
-                <View style={styles.sampleStep}>
-                  <Text style={[styles.sampleStepTitle, { color: COLORS.greenDark }]}>AI Corrected Result</Text>
-                  <View style={[styles.sampleImageBox, { backgroundColor: '#F0FDF4', borderColor: '#A7F3D0' }]}>
-                    <Text style={[styles.sampleResultText, { color: '#15803D', fontWeight: '800' }]}>"Em hái sim ăn"</Text>
-                  </View>
-                </View>
-              </View>
-            </View>
+            <TouchableOpacity
+              style={styles.viewFullArchiveBtn}
+              onPress={() => router.push('/evaluation-history' as any)}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel="Open Full History Archive"
+            >
+              <Text style={styles.viewFullArchiveBtnText}>Open Full History Archive</Text>
+              <Ionicons name="arrow-forward" size={14} color="#1D4ED8" style={{ marginLeft: 6 }} />
+            </TouchableOpacity>
+          </ReportCard>
 
-            {/* 4 Error Cards List */}
-            <View style={styles.errorCardsList}>
-              {/* Error 1 */}
-              <View style={styles.errorMiniCard}>
-                <View style={styles.errorMiniTop}>
-                  <View style={[styles.errorBulletDot, { backgroundColor: COLORS.red }]} />
-                  <Text style={styles.errorMiniTitle}>Missing Character Errors</Text>
-                  <Text style={styles.errorCountBadge}>89 lines (48%)</Text>
-                </View>
-                <Text style={styles.errorMiniDesc}>
-                  Nét bút đầu từ bị mờ hoặc đứt nét. Ví dụ: "Em hái im ăn" ➔ "Em hái sim ăn".
+          {/* ========================================================= */}
+          {/* SECTION 4: ERROR UNDERSTANDING (DATA-DRIVEN)              */}
+          {/* ========================================================= */}
+          <ReportCard testID="error-analysis-section" delayMs={200}>
+            <SectionHeader
+              label="ERROR ANALYSIS"
+              title="Recognition Error Summary"
+              labelColor={REPORT_THEME.amberDark}
+              description="Errors detected across recent recognition sessions."
+            />
+
+            {dashboardMetrics.hasEvaluatedLines ? (
+              <ErrorInsightCard
+                title="Recognition Error Insights"
+                subtitle={`Derived from ${dashboardMetrics.evaluatedLines} verified lines`}
+                errors={dashboardErrors}
+              />
+            ) : (
+              <View style={styles.noDataBox} testID="error-analysis-empty-state">
+                <Ionicons name="scan-outline" size={24} color={REPORT_THEME.amberDark} />
+                <Text style={styles.noDataTitle}>No verified error analysis yet</Text>
+                <Text style={styles.noDataText}>
+                  Error categories will appear after a completed session contains verified reference text.
                 </Text>
               </View>
+            )}
+          </ReportCard>
 
-              {/* Error 2 */}
-              <View style={styles.errorMiniCard}>
-                <View style={styles.errorMiniTop}>
-                  <View style={[styles.errorBulletDot, { backgroundColor: COLORS.amber }]} />
-                  <Text style={styles.errorMiniTitle}>Vietnamese Tone Errors</Text>
-                  <Text style={styles.errorCountBadge}>46 lines (25%)</Text>
+          {/* ========================================================= */}
+          {/* SECTION 5: TECHNICAL DETAILS (MODEL CONFIGURATION)        */}
+          {/* ========================================================= */}
+          <ReportCard testID="model-report-section" borderColor={REPORT_THEME.purpleBorder} delayMs={250}>
+            <SectionHeader
+              label="MODEL CONFIGURATION"
+              title="Model Architecture"
+              labelColor={REPORT_THEME.purpleDark}
+              description="Modular CRNN feature extraction with decoupled Vietnamese linguistic post-processing."
+              rightElement={<StatusBadge label="CRNN-v1.2 + AI Layer" variant="purple" />}
+            />
+
+            <View style={styles.compactModelCard}>
+              <View style={styles.modelHeaderRow}>
+                <View style={styles.modelIconBox}>
+                  <Ionicons name="git-network-outline" size={20} color={REPORT_THEME.purpleDark} />
                 </View>
-                <Text style={styles.errorMiniDesc}>
-                  Dấu thanh (hỏi/ngã, sắc/huyền) viết lệch vị trí hoặc dính vào ký tự nguyên âm.
-                </Text>
-              </View>
-
-              {/* Error 3 */}
-              <View style={styles.errorMiniCard}>
-                <View style={styles.errorMiniTop}>
-                  <View style={[styles.errorBulletDot, { backgroundColor: COLORS.amber }]} />
-                  <Text style={styles.errorMiniTitle}>Similar Character Confusion</Text>
-                  <Text style={styles.errorCountBadge}>35 lines (19%)</Text>
+                <View style={styles.modelTitleGroup}>
+                  <Text style={styles.modelHeading}>CRNN-v1.2 + AI Linguistic Correction Layer</Text>
+                  <Text style={styles.modelVersionPill}>PyTorch • BiLSTM • CTC • Context Layer</Text>
                 </View>
-                <Text style={styles.errorMiniDesc}>
-                  Nhầm lẫn các cặp ký tự hình thái tương đồng: o / ô, u / v, i / l khi học sinh viết nhanh.
-                </Text>
               </View>
 
-              {/* Error 4 */}
-              <View style={styles.errorMiniCard}>
-                <View style={styles.errorMiniTop}>
-                  <View style={[styles.errorBulletDot, { backgroundColor: COLORS.textMuted }]} />
-                  <Text style={styles.errorMiniTitle}>Low Quality Image Errors</Text>
-                  <Text style={styles.errorCountBadge}>15 lines (8%)</Text>
-                </View>
-                <Text style={styles.errorMiniDesc}>
-                  Ảnh chụp bị lóa sáng, bóng đổ hoặc độ tương phản thấp ở rìa trang giấy.
-                </Text>
-              </View>
-            </View>
-
-            {/* Error Summary & Academic Recommendation */}
-            <View style={styles.errorSummaryBox}>
-              <View style={styles.errorSummaryHeader}>
-                <Ionicons name="bulb-outline" size={16} color={COLORS.navyLight} />
-                <Text style={styles.errorSummaryTitle}>Recommendation</Text>
-              </View>
-              <Text style={styles.errorSummaryText}>
-                Improve handwriting segmentation and character boundary detection.
+              <Text style={styles.modelDescription}>
+                Hybrid OCR architecture combining handwriting recognition and Vietnamese language post-processing.
               </Text>
+
+              {/* View Technical Architecture Toggle */}
+              <TouchableOpacity
+                style={styles.techArchBtn}
+                onPress={() => setTechArchOpen(!techArchOpen)}
+                activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel="View Technical Architecture"
+              >
+                <Text style={styles.techArchBtnText}>
+                  {techArchOpen ? 'Hide Technical Architecture' : 'View Technical Architecture'}
+                </Text>
+                <Ionicons
+                  name={techArchOpen ? 'chevron-up' : 'chevron-down'}
+                  size={15}
+                  color={REPORT_THEME.purpleDark}
+                />
+              </TouchableOpacity>
+
+              {/* Expandable Detailed Technical Pipeline */}
+              {techArchOpen && (
+                <View style={styles.techArchContent}>
+                  <View style={styles.stepperContainer}>
+                    {/* Step 1 */}
+                    <View style={styles.stepItem}>
+                      <View style={styles.stepTrackCol}>
+                        <View style={styles.stepCircle}>
+                          <Text style={styles.stepCircleNum}>1</Text>
+                        </View>
+                        <View style={styles.stepLine} />
+                      </View>
+                      <View style={styles.stepCardContent}>
+                        <View style={styles.stepHeaderRow}>
+                          <Ionicons name="image-outline" size={15} color={REPORT_THEME.blueDark} />
+                          <Text style={styles.stepTitle}>Input Image</Text>
+                        </View>
+                        <Text style={styles.stepSubtitle}>Single line handwriting crop</Text>
+                      </View>
+                    </View>
+
+                    {/* Step 2 */}
+                    <View style={styles.stepItem}>
+                      <View style={styles.stepTrackCol}>
+                        <View style={styles.stepCircle}>
+                          <Text style={styles.stepCircleNum}>2</Text>
+                        </View>
+                        <View style={styles.stepLine} />
+                      </View>
+                      <View style={styles.stepCardContent}>
+                        <View style={styles.stepHeaderRow}>
+                          <Ionicons name="scan-outline" size={15} color={REPORT_THEME.blueDark} />
+                          <Text style={styles.stepTitle}>Feature Extraction (CNN)</Text>
+                        </View>
+                        <Text style={styles.stepSubtitle}>Spatial visual feature maps</Text>
+                      </View>
+                    </View>
+
+                    {/* Step 3 */}
+                    <View style={styles.stepItem}>
+                      <View style={styles.stepTrackCol}>
+                        <View style={styles.stepCircle}>
+                          <Text style={styles.stepCircleNum}>3</Text>
+                        </View>
+                        <View style={styles.stepLine} />
+                      </View>
+                      <View style={styles.stepCardContent}>
+                        <View style={styles.stepHeaderRow}>
+                          <Ionicons name="repeat-outline" size={15} color={REPORT_THEME.blueDark} />
+                          <Text style={styles.stepTitle}>Sequence Modeling (BiLSTM)</Text>
+                        </View>
+                        <Text style={styles.stepSubtitle}>Bidirectional contextual RNN</Text>
+                      </View>
+                    </View>
+
+                    {/* Step 4 */}
+                    <View style={styles.stepItem}>
+                      <View style={styles.stepTrackCol}>
+                        <View style={styles.stepCircle}>
+                          <Text style={styles.stepCircleNum}>4</Text>
+                        </View>
+                        <View style={styles.stepLine} />
+                      </View>
+                      <View style={styles.stepCardContent}>
+                        <View style={styles.stepHeaderRow}>
+                          <Ionicons name="code-working-outline" size={15} color={REPORT_THEME.blueDark} />
+                          <Text style={styles.stepTitle}>CTC Decoding</Text>
+                        </View>
+                        <Text style={styles.stepSubtitle}>Connectionist temporal classification</Text>
+                      </View>
+                    </View>
+
+                    {/* Step 5: AI Correction Layer */}
+                    <View style={styles.stepItem}>
+                      <View style={styles.stepTrackCol}>
+                        <View style={[styles.stepCircle, styles.stepCircleGreen]}>
+                          <Ionicons name="sparkles" size={11} color="#FFFFFF" />
+                        </View>
+                        <View style={styles.stepLine} />
+                      </View>
+                      <View style={[styles.stepCardContent, styles.stepCardGreen]}>
+                        <View style={styles.stepHeaderRow}>
+                          <Text style={[styles.stepTitle, { color: REPORT_THEME.emeraldDark, fontWeight: '800' }]}>
+                            AI Correction Layer
+                          </Text>
+                          <StatusBadge label="POST-PROCESS" variant="green" />
+                        </View>
+                        <Text style={[styles.stepSubtitle, { color: '#166534', fontWeight: '500' }]}>
+                          Vietnamese Language Context Post-processing
+                        </Text>
+                      </View>
+                    </View>
+
+                    {/* Step 6: Final Output */}
+                    <View style={[styles.stepItem, { marginBottom: 0 }]}>
+                      <View style={styles.stepTrackCol}>
+                        <View style={[styles.stepCircle, styles.stepCircleNavy]}>
+                          <Ionicons name="checkmark" size={11} color="#FFFFFF" />
+                        </View>
+                      </View>
+                      <View style={[styles.stepCardContent, styles.stepCardNavy]}>
+                        <View style={styles.stepHeaderRow}>
+                          <Text style={[styles.stepTitle, { color: '#FFFFFF' }]}>Final Output</Text>
+                        </View>
+                        <Text style={[styles.stepSubtitle, { color: '#94A3B8' }]}>
+                          Accurate verified Vietnamese sentence
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+                </View>
+              )}
             </View>
-          </View>
+          </ReportCard>
 
           {/* ========================================================= */}
-          {/* 8. EXPANDED TECHNICAL ANALYSIS (COLLAPSIBLE APPENDIX)      */}
+          {/* ADVANCED RESEARCH APPENDIX (COLLAPSIBLE)                  */}
           {/* ========================================================= */}
-          <View style={styles.card}>
+          <ReportCard testID="appendix-section" delayMs={300}>
             <TouchableOpacity
               style={styles.appendixToggleRow}
               onPress={() => setAppendixOpen(!appendixOpen)}
@@ -607,20 +866,17 @@ export default function HandAiAnalyticsScreen() {
               accessibilityLabel="Toggle advanced research appendix"
             >
               <View style={styles.appendixTitleGroup}>
-                <Ionicons name="folder-open-outline" size={18} color={COLORS.navyLight} />
+                <Ionicons name="folder-open-outline" size={18} color={REPORT_THEME.blueDark} />
                 <View>
                   <Text style={styles.appendixTitle}>Advanced Research Appendix</Text>
                   <Text style={styles.appendixSubtitle}>Historical benchmark & confidence analysis</Text>
                 </View>
               </View>
-              <View style={styles.appendixStatePill}>
-                <Text style={styles.appendixStateText}>{appendixOpen ? 'Collapse' : 'Expand'}</Text>
-                <Ionicons
-                  name={appendixOpen ? 'chevron-up' : 'chevron-down'}
-                  size={14}
-                  color={COLORS.navyLight}
-                />
-              </View>
+              <StatusBadge
+                label={appendixOpen ? 'Collapse' : 'Expand'}
+                variant="neutral"
+                icon={appendixOpen ? 'chevron-up' : 'chevron-down'}
+              />
             </TouchableOpacity>
 
             {appendixOpen && (
@@ -646,16 +902,16 @@ export default function HandAiAnalyticsScreen() {
                   <Text style={[styles.tableCell, { flex: 1, textAlign: 'center' }]}>7.8%</Text>
                 </View>
                 <View style={[styles.tableRow, { backgroundColor: '#F0FDF4' }]}>
-                  <Text style={[styles.tableCell, { flex: 2, fontWeight: '800', color: COLORS.greenDark }]}>
+                  <Text style={[styles.tableCell, { flex: 2, fontWeight: '800', color: REPORT_THEME.emeraldDark }]}>
                     CRNN-v1.2 (Active)
                   </Text>
-                  <Text style={[styles.tableCell, { flex: 1, textAlign: 'center', fontWeight: '800', color: COLORS.greenDark }]}>
+                  <Text style={[styles.tableCell, { flex: 1, textAlign: 'center', fontWeight: '800', color: REPORT_THEME.emeraldDark }]}>
                     88.2%
                   </Text>
-                  <Text style={[styles.tableCell, { flex: 1, textAlign: 'center', fontWeight: '800', color: COLORS.greenDark }]}>
+                  <Text style={[styles.tableCell, { flex: 1, textAlign: 'center', fontWeight: '800', color: REPORT_THEME.emeraldDark }]}>
                     2.4%
                   </Text>
-                  <Text style={[styles.tableCell, { flex: 1, textAlign: 'center', fontWeight: '800', color: COLORS.greenDark }]}>
+                  <Text style={[styles.tableCell, { flex: 1, textAlign: 'center', fontWeight: '800', color: REPORT_THEME.emeraldDark }]}>
                     5.9%
                   </Text>
                 </View>
@@ -665,27 +921,27 @@ export default function HandAiAnalyticsScreen() {
                 <View style={styles.confBarRow}>
                   <Text style={styles.confLabel}>High Confidence (0.8 - 1.0)</Text>
                   <View style={styles.confTrack}>
-                    <View style={[styles.confFill, { width: '82%', backgroundColor: COLORS.green }]} />
+                    <View style={[styles.confFill, { width: '82%', backgroundColor: REPORT_THEME.emerald }]} />
                   </View>
                   <Text style={styles.confVal}>82%</Text>
                 </View>
                 <View style={styles.confBarRow}>
                   <Text style={styles.confLabel}>Medium Confidence (0.5 - 0.8)</Text>
                   <View style={styles.confTrack}>
-                    <View style={[styles.confFill, { width: '14%', backgroundColor: COLORS.amber }]} />
+                    <View style={[styles.confFill, { width: '14%', backgroundColor: REPORT_THEME.amber }]} />
                   </View>
                   <Text style={styles.confVal}>14%</Text>
                 </View>
                 <View style={styles.confBarRow}>
                   <Text style={styles.confLabel}>Low Confidence (&lt; 0.5)</Text>
                   <View style={styles.confTrack}>
-                    <View style={[styles.confFill, { width: '4%', backgroundColor: COLORS.red }]} />
+                    <View style={[styles.confFill, { width: '4%', backgroundColor: REPORT_THEME.red }]} />
                   </View>
                   <Text style={styles.confVal}>4%</Text>
                 </View>
               </View>
             )}
-          </View>
+          </ReportCard>
 
           {/* ========================================================= */}
           {/* STANDARDIZED ACTION BUTTONS ROW                           */}
@@ -698,7 +954,7 @@ export default function HandAiAnalyticsScreen() {
               accessibilityRole="button"
               accessibilityLabel="Refresh verification metrics"
             >
-              <Ionicons name="refresh-outline" size={16} color={COLORS.navy} style={{ marginRight: 6 }} />
+              <Ionicons name="refresh-outline" size={16} color={REPORT_THEME.textPrimary} style={{ marginRight: 6 }} />
               <Text style={styles.actionBtnSecondaryText}>Refresh Metrics</Text>
             </TouchableOpacity>
 
@@ -732,16 +988,16 @@ export default function HandAiAnalyticsScreen() {
 }
 
 // -------------------------------------------------------------
-// MOBILE FIRST STYLESHEET
+// MOBILE FIRST STYLESHEET (APPLE HIG + DEEPMIND SYSTEM)
 // -------------------------------------------------------------
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: COLORS.bg,
+    backgroundColor: REPORT_THEME.bg,
   },
   container: {
     flex: 1,
-    backgroundColor: COLORS.bg,
+    backgroundColor: REPORT_THEME.bg,
   },
   scrollContent: {
     paddingHorizontal: 16,
@@ -749,55 +1005,46 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   scrollContentWide: {
-    paddingHorizontal: 24,
-    paddingVertical: 24,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
   },
   mainWrapper: {
     width: '100%',
-    maxWidth: 520, // Mobile-first width target
+    maxWidth: 430, // Locked strictly to true mobile (iPhone Pro Max / Pixel)
+    alignSelf: 'center',
   },
   mainWrapperWide: {
-    maxWidth: 720,
+    maxWidth: 430,
   },
 
   // 1. Header
   headerBlock: {
-    backgroundColor: COLORS.cardBg,
-    borderRadius: 18,
-    padding: 18,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: COLORS.cardBorder,
-    borderTopWidth: 4,
-    borderTopColor: COLORS.navyLight,
-    ...Platform.select({
-      ios: {
-        shadowColor: '#0F172A',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.04,
-        shadowRadius: 10,
-      },
-      android: {
-        elevation: 2,
-      },
-      web: {
-        boxShadow: '0 2px 12px rgba(15, 23, 42, 0.05)',
-      } as any,
-    }),
+    marginBottom: 24,
   },
   headerTop: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    marginBottom: 12,
+    marginBottom: 14,
   },
   logoBadge: {
-    width: 42,
-    height: 42,
-    borderRadius: 12,
-    backgroundColor: COLORS.navy,
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: '#0F172A',
     alignItems: 'center',
     justifyContent: 'center',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#0F172A',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      },
+      android: {
+        elevation: 3,
+      },
+    }),
   },
   headerTitleWrap: {
     flex: 1,
@@ -805,160 +1052,139 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 18,
     fontWeight: '800',
-    color: COLORS.navy,
-    letterSpacing: -0.3,
+    color: REPORT_THEME.textPrimary,
+    letterSpacing: -0.4,
   },
   headerSubtitle: {
     fontSize: 12,
-    color: COLORS.textSecondary,
+    color: REPORT_THEME.textMuted,
     fontWeight: '500',
-    marginTop: 1,
+    marginTop: 2,
   },
   badgesRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 8,
     flexWrap: 'wrap',
-    paddingTop: 10,
+    paddingTop: 12,
     borderTopWidth: 1,
-    borderTopColor: COLORS.divider,
-  },
-  pillBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 10,
-    borderWidth: 1,
-  },
-  pillBadgeText: {
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 0.3,
-  },
-  liveDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    marginRight: 4,
+    borderTopColor: REPORT_THEME.divider,
   },
 
-  // Common Card
-  card: {
-    backgroundColor: COLORS.cardBg,
-    borderRadius: 18,
-    padding: 18,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: COLORS.cardBorder,
-    ...Platform.select({
-      ios: {
-        shadowColor: '#0F172A',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.03,
-        shadowRadius: 8,
-      },
-      android: {
-        elevation: 2,
-      },
-      web: {
-        boxShadow: '0 2px 10px rgba(15, 23, 42, 0.04)',
-      } as any,
-    }),
-  },
-  sectionHeaderRow: {
+  // Supporting metrics row (2 columns layout)
+  supportingMetricsGrid: {
     flexDirection: 'row',
+    gap: 10,
+    flexWrap: 'wrap',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 12,
   },
-  sectionTitleBlock: {
-    flex: 1,
+  supportingColCard: {
+    width: '48.2%',
+    minWidth: 140,
   },
-  sectionLabel: {
-    fontSize: 10,
+  supportingSpanCard: {
+    width: '100%',
+    marginTop: 2,
+  },
+
+  // Dataset Section
+  datasetBadgesGroup: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  datasetInfoContainer: {
+    marginTop: 2,
+  },
+  datasetNameHeading: {
+    fontSize: 14,
     fontWeight: '800',
-    color: COLORS.textMuted,
-    letterSpacing: 0.8,
+    color: REPORT_THEME.textPrimary,
     marginBottom: 2,
   },
-  sectionHeading: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: COLORS.navy,
-    letterSpacing: -0.3,
+  datasetTotalText: {
+    fontSize: 12,
+    color: REPORT_THEME.textMuted,
+    marginBottom: 12,
   },
-
-  // 2. Hero Summary
-  heroSummaryPill: {
-    backgroundColor: '#EFF6FF',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 8,
-  },
-  heroSummaryPillText: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: COLORS.navyLight,
-  },
-  heroIntroText: {
-    fontSize: 13,
-    color: COLORS.textSecondary,
-    lineHeight: 18,
-    marginBottom: 14,
-  },
-  heroGrid: {
+  datasetSplitCardsRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
     gap: 10,
+    marginBottom: 10,
   },
-  heroMetricCard: {
-    width: '48.5%',
-    flexGrow: 1,
+  corpusCard: {
+    flex: 1,
+    backgroundColor: '#F8FAFC',
     borderRadius: 14,
     padding: 12,
     borderWidth: 1,
+    borderColor: '#E2E8F0',
   },
-  heroCardTop: {
+  corpusCardBenchmark: {
+    borderColor: REPORT_THEME.emeraldBorder,
+    backgroundColor: '#F0FDF4',
+  },
+  corpusCardLabel: {
+    fontSize: 10.5,
+    fontWeight: '700',
+    color: REPORT_THEME.textMuted,
+    marginBottom: 3,
+  },
+  corpusCardNumber: {
+    fontSize: 20,
+    fontWeight: '900',
+    color: REPORT_THEME.textPrimary,
+    letterSpacing: -0.4,
+  },
+  corpusCardSub: {
+    fontSize: 10,
+    color: REPORT_THEME.textMuted,
+    marginTop: 2,
+  },
+  datasetBarTrack: {
+    height: 8,
+    borderRadius: 4,
+    flexDirection: 'row',
+    overflow: 'hidden',
+    backgroundColor: '#E2E8F0',
+    marginBottom: 10,
+  },
+  datasetBarFill: {
+    height: '100%',
+  },
+  benchmarkNote: {
+    fontSize: 11,
+    color: REPORT_THEME.textMuted,
+    fontStyle: 'italic',
+    lineHeight: 16,
+  },
+
+  // Evaluation summary inside dataset
+  evalSummaryContainer: {
+    marginTop: 14,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: REPORT_THEME.divider,
+  },
+  evalSummaryHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 6,
+    marginBottom: 8,
   },
-  heroMetricCategory: {
-    fontSize: 9,
+  evalSummaryTitle: {
+    fontSize: 13,
     fontWeight: '800',
-    letterSpacing: 0.5,
+    color: REPORT_THEME.textPrimary,
   },
-  heroMetricNumber: {
-    fontSize: 22,
-    fontWeight: '900',
-    letterSpacing: -0.5,
-    marginBottom: 2,
-  },
-  heroMetricTitle: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: COLORS.textPrimary,
-    lineHeight: 15,
-    marginBottom: 2,
-  },
-  heroMetricSub: {
-    fontSize: 10,
-    color: COLORS.textMuted,
-    lineHeight: 13,
-  },
-
-  // 3. Evaluation Summary
   evalBatchTag: {
     fontSize: 11,
     fontWeight: '600',
-    color: COLORS.textMuted,
+    color: REPORT_THEME.textMuted,
   },
   evalGrid: {
     backgroundColor: '#F8FAFC',
-    borderRadius: 12,
-    paddingHorizontal: 12,
+    borderRadius: 14,
+    paddingHorizontal: 14,
     paddingVertical: 4,
     borderWidth: 1,
     borderColor: '#E2E8F0',
@@ -969,336 +1195,33 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 8,
     borderBottomWidth: 1,
-    borderBottomColor: COLORS.divider,
+    borderBottomColor: REPORT_THEME.divider,
   },
   evalLabel: {
     fontSize: 12,
-    color: COLORS.textSecondary,
+    color: REPORT_THEME.textSecondary,
     fontWeight: '500',
   },
   evalValue: {
     fontSize: 12,
     fontWeight: '700',
-    color: COLORS.textPrimary,
+    color: REPORT_THEME.textPrimary,
   },
 
-  // 4. Model Architecture (Vertical Stepper)
-  techTag: {
-    backgroundColor: '#EFF6FF',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 6,
-  },
-  techTagText: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: COLORS.navyLight,
-  },
-  stepperContainer: {
-    paddingTop: 4,
-  },
-  stepItem: {
-    flexDirection: 'row',
-    marginBottom: 10,
-  },
-  stepTrackCol: {
-    alignItems: 'center',
-    width: 28,
-    marginRight: 10,
-  },
-  stepCircle: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: '#EFF6FF',
-    borderWidth: 1.5,
-    borderColor: COLORS.navyBorder,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  stepCircleNum: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: COLORS.navyLight,
-  },
-  stepLine: {
-    width: 2,
-    flex: 1,
-    backgroundColor: '#E2E8F0',
-    marginVertical: 3,
-  },
-  stepCardContent: {
-    flex: 1,
-    backgroundColor: '#F8FAFC',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-  },
-  stepHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: 2,
-  },
-  stepTitle: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: COLORS.navy,
-  },
-  stepSubtitle: {
-    fontSize: 11,
-    color: COLORS.textMuted,
-  },
-  stepCircleGreen: {
-    backgroundColor: COLORS.green,
-    borderColor: COLORS.greenBorder,
-  },
-  stepCardGreen: {
-    backgroundColor: '#F0FDF4',
-    borderColor: COLORS.greenBorder,
-    borderWidth: 1.5,
-  },
-  postProcessingPill: {
-    backgroundColor: '#DCFCE7',
-    paddingHorizontal: 6,
-    paddingVertical: 1,
-    borderRadius: 4,
-    marginLeft: 'auto',
-  },
-  postProcessingText: {
-    fontSize: 8,
-    fontWeight: '800',
-    color: '#15803D',
-  },
-  stepCircleNavy: {
-    backgroundColor: COLORS.navy,
-    borderColor: COLORS.navy,
-  },
-  stepCardNavy: {
-    backgroundColor: COLORS.navy,
-    borderColor: COLORS.navy,
-  },
-
-  // 5. AI Contribution
-  gainTagPill: {
-    backgroundColor: '#DCFCE7',
-    borderWidth: 1,
-    borderColor: '#86EFAC',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 10,
-  },
-  gainTagPillText: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: '#15803D',
-  },
-  compareBlock: {
-    marginTop: 4,
-  },
-  compareRowItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  compareColBefore: {
-    flex: 1,
-    backgroundColor: '#F8FAFC',
-    borderRadius: 12,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-  },
-  compareSubTag: {
-    fontSize: 9,
-    fontWeight: '800',
-    color: COLORS.textMuted,
-    marginBottom: 2,
-  },
-  compareModelName: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: COLORS.textSecondary,
-    marginBottom: 4,
-  },
-  compareAccuracyNumber: {
-    fontSize: 26,
-    fontWeight: '900',
-    color: '#334155',
-    letterSpacing: -0.5,
-    marginBottom: 4,
-  },
-  compareBadge: {
-    fontSize: 9,
-    fontWeight: '700',
-    color: '#475569',
-    backgroundColor: '#E2E8F0',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-    alignSelf: 'flex-start',
-  },
-  compareArrowBox: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 4,
-  },
-  arrowGainText: {
-    fontSize: 10,
-    fontWeight: '900',
-    color: COLORS.greenDark,
-    marginTop: 2,
-  },
-  compareColAfter: {
-    flex: 1,
-    backgroundColor: '#F0FDF4',
-    borderRadius: 12,
-    padding: 12,
-    borderWidth: 1.5,
-    borderColor: COLORS.greenBorder,
-  },
-  miniStatsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    backgroundColor: '#F8FAFC',
-    borderRadius: 10,
-    padding: 10,
-    marginTop: 10,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-  },
-  miniStatBox: {
-    alignItems: 'center',
-    flex: 1,
-  },
-  miniStatVal: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: COLORS.navy,
-  },
-  miniStatLabel: {
-    fontSize: 9,
-    color: COLORS.textMuted,
-    marginTop: 1,
-  },
-  academicFootnote: {
-    fontSize: 11,
-    color: COLORS.textMuted,
-    fontStyle: 'italic',
-    lineHeight: 15,
-    marginTop: 8,
-  },
-
-  // 6. Dataset
-  datasetBadgesGroup: {
-    flexDirection: 'row',
-    gap: 6,
-  },
-  verifiedTag: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#ECFDF5',
-    borderWidth: 1,
-    borderColor: '#A7F3D0',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-  },
-  verifiedTagText: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: COLORS.greenDark,
-  },
-  versionTag: {
-    backgroundColor: '#EFF6FF',
-    borderWidth: 1,
-    borderColor: '#BFDBFE',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-  },
-  versionTagText: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: COLORS.navyLight,
-  },
-  datasetInfoContainer: {
-    marginTop: 2,
-  },
-  datasetNameHeading: {
-    fontSize: 14,
-    fontWeight: '800',
-    color: COLORS.navy,
-    marginBottom: 2,
-  },
-  datasetTotalText: {
-    fontSize: 12,
-    color: COLORS.textSecondary,
-    marginBottom: 10,
-  },
-  datasetSplitCardsRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 8,
-  },
-  corpusCard: {
-    flex: 1,
-    backgroundColor: '#F8FAFC',
-    borderRadius: 10,
-    padding: 10,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-  },
-  corpusCardLabel: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: COLORS.textMuted,
-    marginBottom: 2,
-  },
-  corpusCardNumber: {
-    fontSize: 18,
-    fontWeight: '900',
-    color: COLORS.navy,
-    letterSpacing: -0.3,
-  },
-  corpusCardSub: {
-    fontSize: 10,
-    color: COLORS.textMuted,
-    marginTop: 1,
-  },
-  datasetBarTrack: {
-    height: 8,
-    borderRadius: 4,
-    flexDirection: 'row',
-    overflow: 'hidden',
-    backgroundColor: '#E2E8F0',
-    marginBottom: 8,
-  },
-  datasetBarFill: {
-    height: '100%',
-  },
-  benchmarkNote: {
-    fontSize: 11,
-    color: COLORS.textMuted,
-    fontStyle: 'italic',
-    lineHeight: 15,
-  },
   accordionToggleBtn: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingVertical: 10,
-    marginTop: 8,
+    marginTop: 10,
     borderTopWidth: 1,
-    borderTopColor: COLORS.divider,
+    borderTopColor: REPORT_THEME.divider,
     minHeight: 44, // Touch target
   },
   accordionToggleText: {
     fontSize: 11,
     fontWeight: '700',
-    color: COLORS.navyLight,
+    color: REPORT_THEME.blueDark,
   },
   accordionContentBox: {
     backgroundColor: '#F8FAFC',
@@ -1310,43 +1233,171 @@ const styles = StyleSheet.create({
   },
   accordionRow: {
     flexDirection: 'row',
-    paddingVertical: 4,
+    paddingVertical: 5,
     borderBottomWidth: 1,
-    borderBottomColor: COLORS.divider,
+    borderBottomColor: REPORT_THEME.divider,
   },
   accordionKey: {
     fontSize: 11,
     fontWeight: '700',
-    color: COLORS.textSecondary,
-    width: 100,
+    color: REPORT_THEME.textSecondary,
+    width: 110,
   },
   accordionVal: {
     fontSize: 11,
-    color: COLORS.textPrimary,
+    color: REPORT_THEME.textPrimary,
     flex: 1,
   },
 
-  // 7. Error Analysis
-  errorSummaryTag: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: COLORS.textMuted,
-  },
-  visualSampleBox: {
+  // Dataset Secondary Stats
+  datasetSecondaryStatsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: '#F8FAFC',
     borderRadius: 12,
-    padding: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: '#EDF2F7',
+    marginBottom: 10,
+  },
+  datasetSecondaryStatItem: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  datasetSecondaryStatLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#64748B',
+    marginBottom: 2,
+  },
+  datasetSecondaryStatVal: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#1E293B',
+  },
+  datasetSecondaryStatDivider: {
+    width: 1,
+    height: 24,
+    backgroundColor: '#E2E8F0',
+  },
+
+  // Evaluation History List
+  historyList: {
+    marginTop: 4,
+  },
+  viewFullArchiveBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#EFF6FF',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    paddingVertical: 10,
+    marginTop: 6,
+  },
+  viewFullArchiveBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#1D4ED8',
+  },
+
+  // Error Analysis
+  errorOverviewCard: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 16,
+    padding: 14,
     borderWidth: 1,
     borderColor: '#E2E8F0',
-    marginBottom: 12,
+    marginBottom: 14,
+  },
+  overviewStatsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E2E8F0',
+  },
+  overviewStatCol: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  overviewDivider: {
+    width: 1,
+    height: 28,
+    backgroundColor: '#E2E8F0',
+  },
+  overviewStatVal: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: REPORT_THEME.textPrimary,
+    textAlign: 'center',
+  },
+  overviewStatLabel: {
+    fontSize: 9.5,
+    color: REPORT_THEME.textMuted,
+    fontWeight: '600',
+    marginTop: 2,
+    textAlign: 'center',
+  },
+  recommendationBox: {
+    backgroundColor: '#EFF6FF',
+    borderRadius: 10,
+    padding: 10,
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: REPORT_THEME.blueBorder,
+  },
+  recommendationHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 3,
+  },
+  recommendationTitle: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: REPORT_THEME.blueDark,
+  },
+  recommendationText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#1E3A8A',
+    lineHeight: 15,
+  },
+
+  // Visual Sample Transformation Flow
+  visualSampleBox: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    marginBottom: 14,
+  },
+  visualSampleHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
   },
   visualSampleLabel: {
     fontSize: 10,
     fontWeight: '800',
-    color: COLORS.textMuted,
-    letterSpacing: 0.5,
-    marginBottom: 8,
+    color: REPORT_THEME.textMuted,
+    letterSpacing: 0.6,
     textTransform: 'uppercase',
+  },
+  sampleVisualBadge: {
+    fontSize: 9.5,
+    fontWeight: '600',
+    color: REPORT_THEME.blueDark,
+    backgroundColor: '#EFF6FF',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
   },
   visualSamplePipeline: {
     alignItems: 'center',
@@ -1357,33 +1408,34 @@ const styles = StyleSheet.create({
   sampleStepTitle: {
     fontSize: 10,
     fontWeight: '600',
-    color: COLORS.textMuted,
+    color: REPORT_THEME.textMuted,
     marginBottom: 3,
   },
   sampleImageBox: {
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: '#E2E8F0',
-    borderRadius: 8,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
+    borderRadius: 10,
+    paddingVertical: 7,
+    paddingHorizontal: 12,
   },
   sampleHandwritingText: {
-    fontSize: 12,
+    fontSize: 12.5,
     fontStyle: 'italic',
-    color: COLORS.textPrimary,
+    color: REPORT_THEME.textPrimary,
   },
   sampleResultText: {
-    fontSize: 12,
+    fontSize: 12.5,
     fontWeight: '600',
   },
+
+  // 4 Failure Modes Cards List
   errorCardsList: {
     gap: 8,
-    marginBottom: 12,
   },
   errorMiniCard: {
     backgroundColor: '#F8FAFC',
-    borderRadius: 10,
+    borderRadius: 12,
     padding: 10,
     borderWidth: 1,
     borderColor: '#E2E8F0',
@@ -1402,45 +1454,167 @@ const styles = StyleSheet.create({
   errorMiniTitle: {
     fontSize: 12,
     fontWeight: '700',
-    color: COLORS.navy,
+    color: REPORT_THEME.textPrimary,
     flex: 1,
   },
   errorCountBadge: {
     fontSize: 10,
     fontWeight: '700',
-    color: COLORS.textMuted,
+    color: REPORT_THEME.textMuted,
   },
   errorMiniDesc: {
     fontSize: 11,
-    color: COLORS.textSecondary,
+    color: REPORT_THEME.textSecondary,
     lineHeight: 15,
   },
-  errorSummaryBox: {
-    backgroundColor: '#EFF6FF',
-    borderRadius: 10,
-    padding: 10,
+
+  // Model Configuration (Compact)
+  compactModelCard: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 16,
+    padding: 14,
     borderWidth: 1,
-    borderColor: COLORS.navyBorder,
+    borderColor: '#E2E8F0',
   },
-  errorSummaryHeader: {
+  modelHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    marginBottom: 8,
+  },
+  modelIconBox: {
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    backgroundColor: REPORT_THEME.purpleSurface,
+    borderWidth: 1,
+    borderColor: REPORT_THEME.purpleBorder,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modelTitleGroup: {
+    flex: 1,
+  },
+  modelHeading: {
+    fontSize: 13.5,
+    fontWeight: '800',
+    color: REPORT_THEME.textPrimary,
+    lineHeight: 18,
+  },
+  modelVersionPill: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: REPORT_THEME.purpleDark,
+    marginTop: 2,
+  },
+  modelDescription: {
+    fontSize: 12,
+    color: REPORT_THEME.textSecondary,
+    lineHeight: 17,
+    marginTop: 2,
+    marginBottom: 12,
+  },
+  techArchBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: REPORT_THEME.purpleBorder,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    minHeight: 44, // Touch target
+  },
+  techArchBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: REPORT_THEME.purpleDark,
+  },
+  techArchContent: {
+    marginTop: 14,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#E2E8F0',
+  },
+
+  // Stepper styles for technical architecture
+  stepperContainer: {
+    paddingTop: 2,
+  },
+  stepItem: {
+    flexDirection: 'row',
+    marginBottom: 10,
+  },
+  stepTrackCol: {
+    alignItems: 'center',
+    width: 26,
+    marginRight: 10,
+  },
+  stepCircle: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1.5,
+    borderColor: REPORT_THEME.blueBorder,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepCircleNum: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: REPORT_THEME.blueDark,
+  },
+  stepLine: {
+    width: 2,
+    flex: 1,
+    backgroundColor: '#E2E8F0',
+    marginVertical: 3,
+  },
+  stepCardContent: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  stepHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     marginBottom: 2,
   },
-  errorSummaryTitle: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: COLORS.navyLight,
+  stepTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: REPORT_THEME.textPrimary,
   },
-  errorSummaryText: {
+  stepSubtitle: {
     fontSize: 11,
-    fontWeight: '600',
-    color: '#1E3A8A',
-    lineHeight: 15,
+    color: REPORT_THEME.textMuted,
+  },
+  stepCircleGreen: {
+    backgroundColor: REPORT_THEME.emerald,
+    borderColor: REPORT_THEME.emeraldBorder,
+  },
+  stepCardGreen: {
+    backgroundColor: '#F0FDF4',
+    borderColor: REPORT_THEME.emeraldBorder,
+    borderWidth: 1.5,
+  },
+  stepCircleNavy: {
+    backgroundColor: '#0F172A',
+    borderColor: '#0F172A',
+  },
+  stepCardNavy: {
+    backgroundColor: '#0F172A',
+    borderColor: '#0F172A',
   },
 
-  // 8. Advanced Appendix (Collapsible)
+  // Appendix
   appendixToggleRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1456,36 +1630,23 @@ const styles = StyleSheet.create({
   appendixTitle: {
     fontSize: 13,
     fontWeight: '800',
-    color: COLORS.navy,
+    color: REPORT_THEME.textPrimary,
   },
   appendixSubtitle: {
     fontSize: 11,
-    color: COLORS.textMuted,
-  },
-  appendixStatePill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: '#F1F5F9',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-  },
-  appendixStateText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: COLORS.navyLight,
+    color: REPORT_THEME.textMuted,
+    marginTop: 1,
   },
   appendixContent: {
     marginTop: 14,
     paddingTop: 12,
     borderTopWidth: 1,
-    borderTopColor: COLORS.divider,
+    borderTopColor: REPORT_THEME.divider,
   },
   appendixSubhead: {
     fontSize: 12,
     fontWeight: '800',
-    color: COLORS.navy,
+    color: REPORT_THEME.textPrimary,
     marginBottom: 8,
   },
   tableRowHeader: {
@@ -1498,11 +1659,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     paddingVertical: 6,
     borderBottomWidth: 1,
-    borderBottomColor: COLORS.divider,
+    borderBottomColor: REPORT_THEME.divider,
   },
   tableCell: {
     fontSize: 11,
-    color: COLORS.textSecondary,
+    color: REPORT_THEME.textSecondary,
   },
   confBarRow: {
     flexDirection: 'row',
@@ -1512,7 +1673,7 @@ const styles = StyleSheet.create({
   },
   confLabel: {
     fontSize: 11,
-    color: COLORS.textSecondary,
+    color: REPORT_THEME.textSecondary,
     width: 160,
   },
   confTrack: {
@@ -1528,41 +1689,90 @@ const styles = StyleSheet.create({
   confVal: {
     fontSize: 11,
     fontWeight: '700',
-    color: COLORS.navy,
+    color: REPORT_THEME.textPrimary,
     width: 32,
     textAlign: 'right',
+  },
+
+  noDataBox: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 22,
+    paddingHorizontal: 18,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: REPORT_THEME.cardBorder,
+  },
+  noDataTitle: {
+    marginTop: 8,
+    fontSize: 13,
+    fontWeight: '800',
+    color: REPORT_THEME.textPrimary,
+    textAlign: 'center',
+  },
+  noDataText: {
+    marginTop: 4,
+    fontSize: 11,
+    lineHeight: 16,
+    color: REPORT_THEME.textMuted,
+    textAlign: 'center',
   },
 
   // Action Buttons
   actionButtonsRow: {
     flexDirection: 'row',
-    gap: 10,
-    marginBottom: 20,
+    gap: 12,
+    marginBottom: 24,
   },
   actionBtnSecondary: {
     flex: 1,
-    height: 46,
-    borderRadius: 12,
+    height: 48,
+    borderRadius: 14,
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: '#CBD5E1',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    minHeight: 48, // Large touch target
+    ...Platform.select({
+      ios: {
+        shadowColor: '#0F172A',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.04,
+        shadowRadius: 6,
+      },
+      android: {
+        elevation: 1,
+      },
+    }),
   },
   actionBtnSecondaryText: {
     fontSize: 13,
     fontWeight: '700',
-    color: COLORS.navy,
+    color: REPORT_THEME.textPrimary,
   },
   actionBtnPrimary: {
     flex: 1,
-    height: 46,
-    borderRadius: 12,
-    backgroundColor: COLORS.navy,
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: '#0F172A',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    minHeight: 48, // Large touch target
+    ...Platform.select({
+      ios: {
+        shadowColor: '#0F172A',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.15,
+        shadowRadius: 8,
+      },
+      android: {
+        elevation: 3,
+      },
+    }),
   },
   actionBtnPrimaryText: {
     fontSize: 13,
@@ -1573,30 +1783,30 @@ const styles = StyleSheet.create({
   // Footer
   footerBlock: {
     alignItems: 'center',
-    paddingBottom: 28,
+    paddingBottom: 32,
   },
   footerDivider: {
     width: 48,
     height: 3,
     backgroundColor: '#E2E8F0',
     borderRadius: 2,
-    marginBottom: 10,
+    marginBottom: 12,
   },
   footerBrand: {
     fontSize: 11,
     fontWeight: '600',
-    color: COLORS.textMuted,
+    color: REPORT_THEME.textMuted,
     marginBottom: 6,
   },
   footerPill: {
     backgroundColor: '#F1F5F9',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
     borderRadius: 8,
   },
   footerPillText: {
     fontSize: 10,
     fontWeight: '700',
-    color: COLORS.textSecondary,
+    color: REPORT_THEME.textSecondary,
   },
 });

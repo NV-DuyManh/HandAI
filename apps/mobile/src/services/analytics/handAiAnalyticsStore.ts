@@ -666,9 +666,25 @@ export interface TrialAnalytics {
 export interface RecognitionSession {
   ablationBenchmark?: AblationBenchmarkResult;
   sessionId: string;
+  formattedSessionId?: string; // User-facing recognition entry label, e.g. "Recognition #001"
   timestamp: number;
   dateStr: string;
   status: 'IN_PROGRESS' | 'COMPLETED';
+  // Real recognition memory attributes
+  id?: string; // alias for sessionId
+  imageUri?: string;
+  thumbnailUri?: string; // alias for imageThumbnailUri
+  imageThumbnailUri?: string;
+  rawOcrText?: string; // alias for rawOcrPreview
+  rawOcrPreview?: string;
+  aiSuggestionText?: string; // alias for aiSuggestionPreview
+  aiSuggestionPreview?: string;
+  validatedText?: string; // alias for verifiedResultPreview
+  verifiedResultPreview?: string;
+  detectedText?: string;
+  confidence?: number;
+  processingTime?: number | string; // alias for processingTimeSeconds
+  isSampleData?: boolean; // Clearly marks benchmark sample data vs live recognition
   metricProvenance?: MetricProvenance;
   totalLines: number;
   numberOfLines?: number;
@@ -1657,6 +1673,7 @@ export interface ConfidenceBucket {
 }
 
 const STORAGE_KEY = 'handai_recognition_history_v3';
+const MAX_HISTORY_SESSIONS = 50; // Prevent unbounded storage growth
 
 const memoryStorage: Record<string, string> = {};
 
@@ -1745,13 +1762,15 @@ export const DEFAULT_DATASET_DISTRIBUTION: DatasetDistribution = {
   },
 };
 
-// Seed realistic benchmark validation sessions
+// Seed realistic recognition validation sessions (user-oriented recognition history)
 const DEFAULT_SESSIONS: RecognitionSession[] = [
   {
     sessionId: 'session_benchmark_1',
+    formattedSessionId: 'Recognition #001',
     timestamp: Date.now() - 3600 * 1000 * 24 * 3,
     dateStr: 'Session 1',
     status: 'COMPLETED',
+    isSampleData: true,
     totalLines: 5,
     confirmedLines: 5,
     rawCorrectLines: 4,
@@ -1763,6 +1782,11 @@ const DEFAULT_SESSIONS: RecognitionSession[] = [
     wer: 20,
     wordAccuracy: 80,
     averageConfidence: 84.5,
+    confidence: 84.5,
+    detectedText: 'Bé chăm học bài',
+    rawOcrPreview: 'Bé chăm học bài',
+    aiSuggestionPreview: 'Bé chăm học bài',
+    verifiedResultPreview: 'Bé chăm học bài',
     processingTimeSeconds: 2.2,
     modelVersion: 'CRNN-v1.2-PyTorch',
     datasetVersion: 'HandAI-v1.2',
@@ -1778,9 +1802,11 @@ const DEFAULT_SESSIONS: RecognitionSession[] = [
   },
   {
     sessionId: 'session_benchmark_2',
+    formattedSessionId: 'Recognition #002',
     timestamp: Date.now() - 3600 * 1000 * 24 * 2,
     dateStr: 'Session 2',
     status: 'COMPLETED',
+    isSampleData: true,
     totalLines: 5,
     confirmedLines: 5,
     rawCorrectLines: 4,
@@ -1792,6 +1818,11 @@ const DEFAULT_SESSIONS: RecognitionSession[] = [
     wer: 15,
     wordAccuracy: 85,
     averageConfidence: 87.2,
+    confidence: 87.2,
+    detectedText: 'Em hái sim ăn',
+    rawOcrPreview: 'Em hái im ăn',
+    aiSuggestionPreview: 'Em hái sim ăn',
+    verifiedResultPreview: 'Em hái sim ăn',
     processingTimeSeconds: 2.4,
     modelVersion: 'CRNN-v1.2-PyTorch',
     datasetVersion: 'HandAI-v1.2',
@@ -1807,9 +1838,11 @@ const DEFAULT_SESSIONS: RecognitionSession[] = [
   },
   {
     sessionId: 'session_benchmark_3',
+    formattedSessionId: 'Recognition #003',
     timestamp: Date.now() - 3600 * 1000 * 24,
     dateStr: 'Session 3',
     status: 'COMPLETED',
+    isSampleData: true,
     totalLines: 6,
     confirmedLines: 6,
     rawCorrectLines: 5,
@@ -1821,6 +1854,11 @@ const DEFAULT_SESSIONS: RecognitionSession[] = [
     wer: 8,
     wordAccuracy: 92,
     averageConfidence: 89.6,
+    confidence: 89.6,
+    detectedText: 'Mẹ đi chợ mua rau',
+    rawOcrPreview: 'Me đi chơ mua rau',
+    aiSuggestionPreview: 'Mẹ đi chợ mua rau',
+    verifiedResultPreview: 'Mẹ đi chợ mua rau',
     processingTimeSeconds: 2.6,
     modelVersion: 'CRNN-v1.2-PyTorch',
     datasetVersion: 'HandAI-v1.2',
@@ -1965,9 +2003,7 @@ export class HandAiAnalyticsStore {
         groundTruthStatus = 'EXPLICIT';
       } else if (verdict === 'CORRECT' || verdict === 'CONFIRMED' || verdict === 'ACCEPTED' || verdict === 'MANUAL_EDIT' || verdict === 'WRONG' || verdict === 'REJECTED' || verdict === 'FAILED' || verdict === 'INCORRECT' || verdict === 'AI_CORRECTED' || verdict === 'OCR_CORRECT' || verdict === 'CORRECTED') {
         groundTruthStatus = 'USER_CONFIRMED';
-      } else if (isCompleted && currentText.length > 0) {
-        // When trial is completed (submitted by user), treat all non-empty lines as confirmed
-        // This fixes Line Accuracy = 0% when Character Accuracy = 100%
+      } else if (isCompleted && ((l as any).confirmed === true || (l as any).userConfirmed === true)) {
         groundTruthStatus = 'USER_CONFIRMED';
       } else if (currentText.length > 0) {
         groundTruthStatus = 'FALLBACK';
@@ -2436,12 +2472,11 @@ export class HandAiAnalyticsStore {
     };
 
 
-    // Use real latency from backend if available, otherwise estimate with disclaimer
+    // A missing backend latency is unavailable. Do not estimate a measurement.
     const realLatency = (trial as any).totalLatencyMs || (trial as any).latencyMs;
     const latencySeconds = realLatency
       ? +(realLatency / 1000).toFixed(1)
-      : +(Math.max(1.8, (trial.lines?.length || 1) * 0.42 + 0.5)).toFixed(1);
-    const latencyIsEstimated = !realLatency;
+      : 0;
 
     const funnel: PipelineFunnel = {
       inputStage: 'IMAGE INPUT',
@@ -2475,12 +2510,12 @@ export class HandAiAnalyticsStore {
       sessionId: trial.trialId || `trial_${Date.now()}`,
       timestamp: trialTimestamp,
       formattedDate,
-      imageResolution: `${trial.pageWidth || 1920} x ${trial.pageHeight || 1080}`,
-      modelVersion: (trial as any).modelVersion || 'CRNN-v1.2-PyTorch',
+      imageResolution: trial.pageWidth && trial.pageHeight ? `${trial.pageWidth} x ${trial.pageHeight}` : '',
+      modelVersion: (trial as any).modelVersion || trial.recognitionEngine || 'CRNN-v1.2-PyTorch',
       datasetVersion: (trial as any).datasetVersion || 'HandAI-v1.2',
       experimentId: (trial as any).experimentId || 'exp_crnn_v1_2',
       trainingDate: (trial as any).trainingDate || '2026-07-05',
-      engineVersion: 'HandAI v2.4 (Gemini-4B / Groq Arbitration)',
+      engineVersion: (trial as any).engineVersion || 'HandAI v2.4 (Gemini-4B / Groq Arbitration)',
       numberOfLines: evaluatedLines,
       metrics: {
         lineAccuracy: finalAccuracy,
@@ -2521,11 +2556,11 @@ export class HandAiAnalyticsStore {
 
     return {
       trialId: trial.trialId || `trial_${Date.now()}`,
-      timestamp: Date.now(),
-      imageResolution: `${trial.pageWidth || 1920} x ${trial.pageHeight || 1080}`,
-      modelVersion: (trial as any).modelVersion || 'CRNN-v1.2-PyTorch',
+      timestamp: trialTimestamp,
+      imageResolution: trial.pageWidth && trial.pageHeight ? `${trial.pageWidth} x ${trial.pageHeight}` : '',
+      modelVersion: (trial as any).modelVersion || trial.recognitionEngine || 'CRNN-v1.2-PyTorch',
       datasetVersion: (trial as any).datasetVersion || 'HandAI-v1.2',
-      engineVersion: 'HandAI v2.4 (Gemini-4B / Groq Arbitration)',
+      engineVersion: (trial as any).engineVersion || 'HandAI v2.4 (Gemini-4B / Groq Arbitration)',
       status: isCompleted ? 'COMPLETED' : 'IN_PROGRESS',
       ablationBenchmark,
       metricProvenance: {
@@ -2568,7 +2603,7 @@ export class HandAiAnalyticsStore {
       errorRecords,
       metadata,
       imageInfo: {
-        resolution: `${trial.pageWidth || 1920}x${trial.pageHeight || 1080}`,
+        resolution: trial.pageWidth && trial.pageHeight ? `${trial.pageWidth}x${trial.pageHeight}` : undefined,
         device: Platform.OS === 'ios' ? 'iOS' : Platform.OS === 'android' ? 'Android' : 'Web',
         latency: latencySeconds,
       },
@@ -2612,13 +2647,35 @@ export class HandAiAnalyticsStore {
 
     const validCompleted = this.getSessions();
     const sessionIndex = validCompleted.length + 1;
+    const firstLine = analytics.lineMetrics?.[0];
+    const imageUri = (trial as any).imageUri || (trial as any).photoUri || (trial as any).originalUri || (trial as any).croppedUri;
+    const rawOcr = firstLine?.ocrOutput || firstLine?.modelOutput || firstLine?.ocrText || '';
+    const aiSug = firstLine?.aiCandidate || firstLine?.aiSuggestion || '';
+    const groundTruth = firstLine?.groundTruth || '';
+    const detected = firstLine?.finalText || firstLine?.finalResult || aiSug || rawOcr;
 
     const session: RecognitionSession = {
       ablationBenchmark: analytics.ablationBenchmark,
+      id: trial.trialId || `session_${Date.now()}`,
       sessionId: trial.trialId || `session_${Date.now()}`,
+      formattedSessionId: `Recognition #${String(sessionIndex).padStart(3, '0')}`,
       timestamp: Date.now(),
       dateStr: `Session ${sessionIndex}`,
       status: 'COMPLETED',
+      imageUri,
+      thumbnailUri: imageUri,
+      imageThumbnailUri: imageUri,
+      rawOcrText: rawOcr,
+      rawOcrPreview: rawOcr,
+      aiSuggestionText: aiSug,
+      aiSuggestionPreview: aiSug,
+      validatedText: groundTruth,
+      verifiedResultPreview: groundTruth,
+      detectedText: detected,
+      confidence: analytics.avgConfidence,
+      processingTime: analytics.latencySeconds > 0 ? analytics.latencySeconds : undefined,
+      processingTimeSeconds: analytics.latencySeconds > 0 ? analytics.latencySeconds : undefined,
+      isSampleData: false,
       totalLines: analytics.totalLines,
       numberOfLines: analytics.totalLines,
       confirmedLines: analytics.totalLines,
@@ -2634,16 +2691,15 @@ export class HandAiAnalyticsStore {
       errorRate: +(Math.max(0, 100 - analytics.finalAccuracy)).toFixed(1),
       mainErrorType: analytics.errorSummary?.mainErrorType || 'NO_ERROR',
       averageConfidence: analytics.avgConfidence,
-      processingTimeSeconds: analytics.latencySeconds,
-      modelVersion: (trial as any).modelVersion || 'CRNN-v1.2-PyTorch',
-      datasetVersion: (trial as any).datasetVersion || 'HandAI-v1.2',
+      modelVersion: analytics.modelVersion || 'CRNN-v1.2-PyTorch',
+      datasetVersion: analytics.datasetVersion || 'HandAI-v1.2',
       experimentId: (trial as any).experimentId || 'exp_crnn_v1_2',
       trainingDate: (trial as any).trainingDate || '2026-07-05',
-      ocrEngine: 'CRNN (Primary Vietnamese)',
-      aiEngine: 'Gemini-4B / Groq Arbitration',
-      engineVersion: 'HandAI v2.4 (Gemini-4B / Groq Arbitration)',
+      ocrEngine: trial.recognitionEngine || 'CRNN (Primary Vietnamese)',
+      aiEngine: trial.correctionSource || 'Gemini-4B / Groq Arbitration',
+      engineVersion: analytics.engineVersion || 'HandAI v2.4 (Gemini-4B / Groq Arbitration)',
       device: Platform.OS === 'ios' ? 'iOS' : Platform.OS === 'android' ? 'Android' : 'Web',
-      imageResolution: analytics.imageInfo?.resolution || (trial.pageWidth && trial.pageHeight ? `${trial.pageWidth}x${trial.pageHeight}` : '1920x1080'),
+      imageResolution: analytics.imageInfo?.resolution || (trial.pageWidth && trial.pageHeight ? `${trial.pageWidth}x${trial.pageHeight}` : undefined),
       metricProvenance: analytics.metricProvenance,
       crnnRawCount: analytics.rawCorrect,
       aiCorrectionCount: analytics.aiCorrected,
@@ -2664,6 +2720,12 @@ export class HandAiAnalyticsStore {
     if (session.status === 'COMPLETED' && session.confirmedLines > 0 && session.totalLines > 0) {
       this.sessions = this.sessions.filter((s) => s.sessionId !== session.sessionId);
       this.sessions.push(session);
+
+      // Enforce history limit: keep most recent MAX_HISTORY_SESSIONS
+      if (this.sessions.length > MAX_HISTORY_SESSIONS) {
+        this.sessions.sort((a, b) => b.timestamp - a.timestamp);
+        this.sessions = this.sessions.slice(0, MAX_HISTORY_SESSIONS);
+      }
 
       try {
         await setStorageItem(STORAGE_KEY, JSON.stringify(this.sessions));

@@ -1,0 +1,89 @@
+{
+  "source": "E:\\HandAI\\report\\handai_current_app_revision_20260930\\HandAI_Final.docx",
+  "outputs": [
+    "E:\\HandAI\\report\\handai_live_data_revision_20260930\\HandAI_Final_Live_Data.docx",
+    "E:\\HandAI\\report\\handai_live_data_revision_20260930\\Bao_cao_cap_nhat_du_lieu_thuc_HandAI.docx"
+  ],
+  "changes": [
+    {
+      "before": "2.1.1 Processing and dashboard interface",
+      "after": "2.1.1 Processing and live analytics interface"
+    },
+    {
+      "before": "The processing screen exposes five stages: image preparation, line detection, OCR, AI verification and completion. Its 35% indicator represents interface progress rather than recognition quality. The adjacent research dashboard groups model, character, word and AI-assistance displays. [10]",
+      "after": "The processing screen exposes five stages: image preparation, line detection, OCR, AI verification and completion. Its 35% indicator represents workflow progress rather than recognition quality. The live analytics dashboard now reads completed device sessions, excludes bundled sample records and calculates values only where usable reference text exists. [4, 10]"
+    },
+    {
+      "before": "Figure 4. User-provided processing and current research-dashboard screens. The progress indicator describes workflow state; dashboard overview values are fixed UI content in the current screen implementation. [10]",
+      "after": "Figure 4. User-provided processing screen and code-derived live analytics data path. The progress indicator describes workflow state; the dashboard path shows how runtime evidence replaces fixed presentation values. [4, 7, 10]"
+    },
+    {
+      "before": "HandAI separates the mobile client, Java backend, Python AI service, persistence and client analytics. CRNN inference runs in the AI service. PostgreSQL holds trials and line records; MinIO holds page images and line crops. The research screen combines fixed overview cards with history loaded from the client analytics store. [2–5, 10]",
+      "after": "HandAI separates the mobile client, Java backend, Python AI service, persistence and client analytics. CRNN inference runs in the AI service. PostgreSQL holds trials and line records; MinIO holds page images and line crops. The research dashboard loads the client history store, filters completed non-sample sessions and aggregates verified line records. [2–5, 10]"
+    },
+    {
+      "before": "Figure 7. Current implementation architecture, including background AI advice and the separate dashboard presentation layer. Sources: model code, OCR API, multiline service and mobile screens. [1–5, 10]",
+      "after": "Figure 7. Current implementation architecture with background AI advice and a live dashboard aggregation layer. Sources: model code, OCR API, multiline service and mobile analytics. [1–5, 10]"
+    },
+    {
+      "before": "The store currently averages available session CER/WER values without weighting by reference length, and getSessions() retains completed sample sessions. For a corpus result, sum edit counts and reference lengths after explicitly excluding seeded data. Fixed dashboard cards are a separate presentation layer. [4, 10]",
+      "after": "The dedicated dashboard aggregator filters completed non-sample sessions before display. It computes corpus CER and WER from total edit counts divided by total reference units, counts exact raw and final line matches, and derives confidence, latency and error items from the same live records. The legacy global analytics method remains separate and is not used for the research dashboard. [4, 10]"
+    },
+    {
+      "before": "The primary recorded model result is validation CER 11.3388% at checkpoint step 16,900 on the declared 500-sample validation split. It is a model-handoff measurement and is distinct from the current dashboard overview cards. [1]",
+      "after": "The primary recorded model result remains validation CER 11.3388% at checkpoint step 16,900 on the declared 500-sample validation split. This model-handoff measurement remains separate from device-session analytics, whose values vary with the completed live records stored on the device. [1, 4, 10]"
+    },
+    {
+      "before": "The current research screen hard-codes its headline accuracy, AI comparison, dataset total and 500-line summary. Session history is loaded separately. Figures 4 and 10 therefore document the current interface; they are not used as experimental evidence. [10]",
+      "after": "The research screen no longer supplies headline accuracy, dataset totals, comparison gains, latency or confidence through fallback constants. When no verified live lines exist, metric cards show an em dash or an explanatory empty state. When verified lines exist, every displayed value is derived from the filtered session and line records. [4, 10]"
+    },
+    {
+      "before": "The 80% → 92% comparison is a 12-percentage-point change (15% relative). The separate 315/500 → 460/500 summary implies 63% → 92%, or 29 points. They cannot be combined as one experiment. Likewise, the displayed 2.3 seconds per image and 91.4% confidence require recorded runs and calibration before scientific interpretation. [10]",
+      "after": "The dashboard reports the change from raw exact-line accuracy to the selected final result in percentage points. Because the final selection can reflect both an AI suggestion and manual review, the interface labels this value as assisted workflow improvement rather than attributing the entire change to AI alone. [4, 10]"
+    },
+    {
+      "before": "Current research dashboard views",
+      "after": "Live analytics calculation and display states"
+    },
+    {
+      "before": "Figure 10. Current AI-assistance and dataset panels supplied by the project owner. The values and verification badges are retained exactly as displayed; their implementation as fixed UI content is explained above. [7, 10]",
+      "after": "Figure 10. Metric inclusion rules and dashboard display logic derived from the current implementation. Verified values use completed non-sample sessions; unavailable evidence produces an explicit empty state. [4, 10]"
+    },
+    {
+      "before": "These panels communicate the intended progression from recognition to language advice and review. The research evaluation remains the matched comparison in Section 6.6, using independent references and exported line-level results.",
+      "after": "These diagrams document the operational dashboard calculation. A user-confirmed reference is suitable for workflow monitoring but may not be independent of the selected output; the matched research comparison in Section 6.6 still requires frozen external references and exported line-level results."
+    },
+    {
+      "before": "The client maintains dataset/model registrations, trial analytics, history and exports; the backend persists multiline trials, line crops and feedback. Completed sessions with confirmed lines enter the local history, capped at 50 sessions. Native storage uses SecureStore and web storage uses localStorage, with an in-memory fallback. Seeded sessions and fixed overview cards remain separate from independently scored experiments. [4, 5, 10]",
+      "after": "The client maintains dataset/model registrations, trial analytics, history and exports; the backend persists multiline trials, line crops and feedback. Completed sessions enter the local history, capped at 50 sessions. Native storage uses SecureStore and web storage uses localStorage, with an in-memory fallback. The research dashboard excludes sessions marked as sample data and displays only values derived from the remaining records. [4, 5, 10]"
+    },
+    {
+      "before": "[4] apps/mobile/src/services/analytics/handAiAnalyticsStore.ts. Trial scoring, reference-status rules, local persistence, seeded sessions, default values and session aggregation.",
+      "after": "[4] apps/mobile/src/services/analytics/handAiAnalyticsStore.ts and handAiDashboardMetrics.ts. Trial scoring, reference-status rules, persistence, live-session filtering and corpus metric aggregation."
+    },
+    {
+      "before": "[7] User-supplied app screenshots: capture/crop/review/result screens from the source document and four current processing/research-dashboard images. These document UI behavior and presentation, not an independently reproduced benchmark.",
+      "after": "[7] User-supplied app screenshots: capture/crop/review/result screens from the source document and the current processing screen. These document UI behavior; the analytics diagrams were generated from the inspected source code."
+    },
+    {
+      "before": "[10] apps/mobile/src/app/handai-analytics.tsx, (tabs)/index.tsx, crop.tsx, ocr-pilot/multiline-review.tsx and multiline-result.tsx; services/api/ocrPilotService.ts; components/ocr/OCRProgressLoader.tsx. Current cards, routing, line editing, polling and progress states.",
+      "after": "[10] apps/mobile/src/app/handai-analytics.tsx, (tabs)/index.tsx, crop.tsx, ocr-pilot/multiline-review.tsx and multiline-result.tsx; services/api/ocrPilotService.ts; services/analytics/handAiDashboardMetrics.ts; components/ocr/OCRProgressLoader.tsx. Current routing, line editing, polling, progress and live dashboard states."
+    },
+    {
+      "before": "Score A, B and C against the same reference. Compute corpus CER/WER from total edit counts and total reference units; report exact-line matches with numerator and denominator. Report newly corrected and newly damaged lines, provider/fallback counts and paired uncertainty intervals. A rise from 80% to 92% would be 12 percentage points (15% relative), not an automatically established 12% AI contribution.",
+      "after": "Score A, B and C against the same reference. Compute corpus CER/WER from total edit counts and total reference units; report exact-line matches with numerator and denominator. Report newly corrected and newly damaged lines, provider/fallback counts and paired uncertainty intervals. Express the raw-to-final difference in percentage points and report relative change only when its denominator and interpretation are explicit."
+    }
+  ],
+  "removed_dashboard_image_relationships": [
+    "rId15",
+    "rId16",
+    "rId22",
+    "rId23"
+  ],
+  "figures": [
+    "E:\\HandAI\\report\\handai_live_data_revision_20260930\\figures\\live_analytics_pipeline.png",
+    "E:\\HandAI\\report\\handai_live_data_revision_20260930\\figures\\metric_inclusion_rules.png",
+    "E:\\HandAI\\report\\handai_live_data_revision_20260930\\figures\\dashboard_display_logic.png",
+    "E:\\HandAI\\report\\handai_live_data_revision_20260930\\figures\\architecture_live_metrics.png"
+  ]
+}

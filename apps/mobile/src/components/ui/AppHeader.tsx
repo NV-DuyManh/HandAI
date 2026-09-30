@@ -6,6 +6,7 @@ import { useRouter } from 'expo-router';
 
 interface AppHeaderProps {
   title: string;
+  subtitle?: string;
   showBack?: boolean;
   rightIcon?: keyof typeof Ionicons.glyphMap;
   onRightPress?: () => void;
@@ -14,6 +15,7 @@ interface AppHeaderProps {
 
 export const AppHeader: React.FC<AppHeaderProps> = ({
   title,
+  subtitle,
   showBack = false,
   rightIcon,
   onRightPress,
@@ -37,13 +39,20 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
         <View style={styles.placeholder} />
       )}
 
-      <Text
-        style={styles.title}
-        numberOfLines={1}
-        accessibilityRole="header"
-      >
-        {title}
-      </Text>
+      <View style={styles.titleContainer}>
+        <Text
+          style={styles.title}
+          numberOfLines={1}
+          accessibilityRole="header"
+        >
+          {title}
+        </Text>
+        {subtitle ? (
+          <Text style={styles.subtitle} numberOfLines={1}>
+            {subtitle}
+          </Text>
+        ) : null}
+      </View>
 
       {rightIcon ? (
         <TouchableOpacity
@@ -64,22 +73,34 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
 
 const styles = StyleSheet.create({
   container: {
-    height: 56,
+    minHeight: 56,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: SIZES.small,
+    paddingVertical: 6,
     backgroundColor: COLORS.surface,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
   },
-  title: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: COLORS.textPrimary,
+  titleContainer: {
     flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+  title: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: COLORS.textPrimary,
     textAlign: 'center',
-    paddingHorizontal: SIZES.small,
+  },
+  subtitle: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#64748B',
+    textAlign: 'center',
+    marginTop: 1,
   },
   iconButton: {
     width: SIZES.minTouchTarget,

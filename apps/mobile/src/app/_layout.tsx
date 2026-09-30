@@ -63,9 +63,9 @@ export default function RootLayout() {
           <Stack.Screen name="privacy" />
           <Stack.Screen name="processing" />
           <Stack.Screen name="results" />
-          <Stack.Screen name="ocr-pilot" />
           <Stack.Screen name="handai-analytics" />
           <Stack.Screen name="handai-trial-analytics" />
+          <Stack.Screen name="evaluation-history" />
           <Stack.Screen name="gallery" />
           <Stack.Screen name="dev-demo" />
         </Stack>

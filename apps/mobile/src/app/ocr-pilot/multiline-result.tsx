@@ -13,7 +13,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SIZES, SHADOWS } from '../../constants/theme';
 import { OcrPilotService, MultilineTrialResult, MultilineLineResult } from '../../services/api/OcrPilotService';
-import { logFlowDomain } from '../../services/draft/submissionDraftStore';
+import { logFlowDomain, submissionDraftStore } from '../../services/draft/submissionDraftStore';
 import {
   buildVisibleSuggestions,
   VisibleSuggestion,
@@ -913,7 +913,14 @@ export default function MultilineResultScreen() {
             style={styles.trialAnalyticsBtn}
             onPress={async () => {
               if (trial) {
-                await handAiAnalyticsStore.completeTrial(trial);
+                const draft = submissionDraftStore.getDraft();
+                await handAiAnalyticsStore.completeTrial({
+                  ...trial,
+                  imageUri: draft?.croppedImageUri || draft?.uri || draft?.originalImageUri,
+                  originalUri: draft?.originalImageUri || draft?.originalUri,
+                  pageWidth: trial.pageWidth || draft?.width,
+                  pageHeight: trial.pageHeight || draft?.height,
+                } as MultilineTrialResult);
                 router.push({
                   pathname: '/handai-trial-analytics' as any,
                   params: { trialId: trial.trialId },
@@ -932,7 +939,14 @@ export default function MultilineResultScreen() {
           style={styles.doneBtn}
           onPress={async () => {
             if (isHandAI && trial) {
-              await handAiAnalyticsStore.completeTrial(trial);
+              const draft = submissionDraftStore.getDraft();
+              await handAiAnalyticsStore.completeTrial({
+                ...trial,
+                imageUri: draft?.croppedImageUri || draft?.uri || draft?.originalImageUri,
+                originalUri: draft?.originalImageUri || draft?.originalUri,
+                pageWidth: trial.pageWidth || draft?.width,
+                pageHeight: trial.pageHeight || draft?.height,
+              } as MultilineTrialResult);
             }
             Alert.alert(
               isHandAI ? 'Evaluation Complete' : 'Thành công',
