@@ -86,6 +86,7 @@ def test_ocr_pilot_recognize_line_raw_bytes_success():
     # Real CRNN confidence metric (0.0 to 1.0), not None and no fake 1.0
     assert data.get("confidence") is not None
     assert 0.0 <= data["confidence"] <= 1.0
+    assert data["confidence_source"] == "CRNN_CTC_SOFTMAX"
 
 def test_ocr_pilot_empty_image_rejected():
     response = client.post(

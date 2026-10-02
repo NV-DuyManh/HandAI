@@ -2,6 +2,7 @@ package com.mathvisionkids.api.ocr.multiline;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.mathvisionkids.api.ocr.OcrConfidence;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -22,6 +23,7 @@ public class LineBoxDto {
 
     private String rawOcrText;
     private Double rawOcrConfidence;
+    private String rawOcrConfidenceSource;
     private String correctedText;
     private Double correctionConfidence;
     private Boolean correctionApplied;
@@ -31,17 +33,30 @@ public class LineBoxDto {
 
     private String groqSuggestion;
     private Double groqConfidence;
+    private String groqConfidenceSource;
     private String groqDecision;
     private String groqStatus;
     private String groqModel;
 
     private String geminiSuggestion;
     private Double geminiConfidence;
+    private String geminiConfidenceSource;
     private String geminiDecision;
     private String geminiStatus;
     private String geminiModel;
 
     private java.util.List<java.util.Map<String, Object>> suggestions;
+
+    public void sanitizeConfidence() {
+        rawOcrConfidence = OcrConfidence.rawScore(rawOcrConfidence, rawOcrConfidenceSource);
+        rawOcrConfidenceSource = rawOcrConfidence != null ? OcrConfidence.CRNN_CTC_SOFTMAX : null;
+        groqConfidence = OcrConfidence.advisorScore(groqConfidence, groqStatus, groqConfidenceSource);
+        groqConfidenceSource = groqConfidence != null ? OcrConfidence.AI_SELF_REPORTED : null;
+        geminiConfidence = OcrConfidence.advisorScore(geminiConfidence, geminiStatus, geminiConfidenceSource);
+        geminiConfidenceSource = geminiConfidence != null ? OcrConfidence.AI_SELF_REPORTED : null;
+        correctionConfidence = null;
+        suggestions = OcrConfidence.suggestions(suggestions);
+    }
 
     public LineBoxDto(String lineId, int x, int y, int width, int height, int order, String text) {
         this.lineId = lineId;

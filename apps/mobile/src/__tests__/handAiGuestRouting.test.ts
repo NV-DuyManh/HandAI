@@ -1,6 +1,7 @@
 import * as appModeModule from '../config/appMode';
 import { OcrPilotService } from '../services/api/OcrPilotService';
 import apiClient from '../services/api/apiClient';
+import { Platform } from 'react-native';
 
 jest.mock('../services/api/apiClient', () => {
   return {
@@ -93,5 +94,38 @@ describe('HandAI Guest API Routing (Fix V7)', () => {
     const calledUrl = (apiClient.post as jest.Mock).mock.calls[0][0];
     expect(calledUrl).toBe('/handai/ocr/multiline/trials');
     expect(result.trialId).toBe('test-trial-123');
+    expect(typeof result.totalLatencyMs).toBe('number');
+    expect(result.totalLatencyMs).toBeGreaterThanOrEqual(0);
+    expect(OcrPilotService.getCachedTrial(result.trialId)?.totalLatencyMs).toBe(result.totalLatencyMs);
+  });
+
+  it('preserves measured recognition duration when polling refreshes the trial', async () => {
+    OcrPilotService.cacheTrial({ trialId: 'timed-trial', totalLatencyMs: 1700, lines: [] } as any);
+    (apiClient.get as jest.Mock).mockResolvedValueOnce({ data: { trialId: 'timed-trial', lines: [] } });
+    const result = await OcrPilotService.getMultilineTrial('timed-trial');
+    expect(result.totalLatencyMs).toBe(1700);
+  });
+
+  it('uploads browser image bytes as a file part instead of a native URI object', async () => {
+    jest.replaceProperty(Platform, 'OS', 'web');
+    jest.spyOn(appModeModule, 'isHandAIMode').mockReturnValue(true);
+    const append = jest.spyOn(FormData.prototype, 'append');
+    const imageBlob = new Blob(['actual image bytes'], { type: 'image/jpeg' });
+    // Preserve Expo's lazy global without evaluating its fetch getter.
+    const originalFetchDescriptor = Object.getOwnPropertyDescriptor(global, 'fetch')!;
+    Object.defineProperty(global, 'fetch', {
+      configurable: true,
+      writable: true,
+      value: jest.fn().mockResolvedValue({ ok: true, blob: async () => imageBlob }),
+    });
+    (apiClient.post as jest.Mock).mockResolvedValueOnce({ data: { lines: [], width: 932, height: 916 } });
+    try {
+      await OcrPilotService.detectLines('blob:http://localhost/owner-image', true, true);
+      expect(global.fetch).toHaveBeenCalledWith('blob:http://localhost/owner-image', expect.any(Object));
+      expect(append).toHaveBeenCalledWith('image', imageBlob, expect.any(String));
+      expect(apiClient.post).toHaveBeenCalledWith('/handai/ocr/multiline/detect', expect.any(FormData), expect.any(Object));
+    } finally {
+      Object.defineProperty(global, 'fetch', originalFetchDescriptor);
+    }
   });
 });

@@ -5,7 +5,7 @@ import { ImageDraft } from '../draft/submissionDraftStore';
 
 /**
  * Normalizes local file URIs safely.
- * - Guarantees file:// scheme
+ * - Adds file:// only to local paths; preserves browser and content URIs
  * - NEVER runs decodeURIComponent() or decodeURI() on file:// paths
  * - Preserves literal percent-encoded Expo ExperienceData paths (%2540 / %40)
  */
@@ -15,6 +15,8 @@ export function normalizeLocalFileUri(uri: string): string {
   if (
     !clean.startsWith('file://') &&
     !clean.startsWith('content://') &&
+    !clean.startsWith('blob:') &&
+    !clean.startsWith('data:') &&
     !clean.startsWith('http://') &&
     !clean.startsWith('https://')
   ) {

@@ -1,11 +1,12 @@
 import type { MultilineLineResult } from '../services/api/OcrPilotService';
+import { getRawOcrConfidence } from './ocrConfidence';
 
 export interface AdvisorView {
   provider: 'GROQ' | 'GEMINI';
   model: string;
   status: 'SUCCESS' | 'NOT_TRIGGERED' | 'UNAVAILABLE' | 'DISABLED' | 'ERROR';
   text: string;
-  confidence: number;
+  confidence?: number;
   decision?: string;
   wasTriggered: boolean;
 }
@@ -43,6 +44,41 @@ export interface BuildSuggestionsOptions {
 
 export type LineReviewStatus = 'SUGGESTIONS_AVAILABLE' | 'AI_CONFIRMED' | 'PROVIDER_OUTAGE';
 
+function normalizedStatus(status: string | null | undefined): string {
+  return typeof status === 'string' ? status.trim().toUpperCase() : '';
+}
+
+function isLocalAdvisor(model: string | null | undefined): boolean {
+  return typeof model === 'string' && model.trim().replace(/[\s_-]/g, '').toUpperCase() === 'LOCALADVISOR';
+}
+
+function providerEvidenceRejected(line: Partial<MultilineLineResult>, provider: string): boolean {
+  if (normalizedStatus(line.correctionDecision) === 'LOCAL_ADVISOR_APPLY') return true;
+  const records = line.suggestions?.filter((item) => item?.provider === provider) ?? [];
+  return records.some((item) => normalizedStatus(item.status) !== '' && normalizedStatus(item.status) !== 'SUCCESS') &&
+    !records.some((item) => normalizedStatus(item.status) === 'SUCCESS');
+}
+
+function providerCandidateSucceeded(
+  line: Partial<MultilineLineResult>,
+  provider: string,
+  status: string | null | undefined,
+  model: string | null | undefined
+): boolean {
+  if (provider !== 'GROQ' && provider !== 'GEMINI') return false;
+  if (providerEvidenceRejected(line, provider)) return false;
+  const directStatus = provider === 'GROQ' ? line.groqStatus : line.geminiStatus;
+  const directModel = provider === 'GROQ' ? line.groqModel : line.geminiModel;
+  return normalizedStatus(status) === 'SUCCESS' &&
+    (!directStatus || normalizedStatus(directStatus) === 'SUCCESS') &&
+    !isLocalAdvisor(model) && !isLocalAdvisor(directModel);
+}
+
+function selfReportedConfidence(score: number | null | undefined, source: string | null | undefined): number | undefined {
+  return source === 'AI_SELF_REPORTED' && typeof score === 'number' &&
+    Number.isFinite(score) && score >= 0 && score <= 1 ? score : undefined;
+}
+
 /**
  * Builds the internal advisor view for a given provider.
  */
@@ -51,48 +87,54 @@ export function buildAdvisorView(
   provider: 'GROQ' | 'GEMINI'
 ): AdvisorView {
   const fromSuggestions = Array.isArray(line.suggestions)
-    ? line.suggestions.find((s) => s.provider === provider)
+    ? line.suggestions.find((s) => s?.provider === provider && providerCandidateSucceeded(line, provider, s.status, s.model)) ??
+      line.suggestions.find((s) => s?.provider === provider)
     : undefined;
 
   let directText = provider === 'GROQ' ? line.groqSuggestion : line.geminiSuggestion;
   const directStatus = provider === 'GROQ' ? line.groqStatus : line.geminiStatus;
   const directModel = provider === 'GROQ' ? line.groqModel : line.geminiModel;
   const directConfidence = provider === 'GROQ' ? line.groqConfidence : line.geminiConfidence;
+  const directConfidenceSource = provider === 'GROQ' ? line.groqConfidenceSource : line.geminiConfidenceSource;
   const directDecision = provider === 'GROQ' ? line.groqDecision : line.geminiDecision;
 
   // Fallback for Groq legacy correctedText
-  if (provider === 'GROQ' && !directText && line.correctedText && directStatus !== 'UNAVAILABLE') {
+  if (provider === 'GROQ' && !directText && line.correctedText && normalizedStatus(directStatus) === 'SUCCESS') {
     directText = line.correctedText;
   }
 
-  const text = (directText || fromSuggestions?.text || '').trim();
+  const useDirectText = Boolean(directText?.trim()) && normalizedStatus(directStatus) === 'SUCCESS';
+  const text = (useDirectText ? directText || '' : fromSuggestions?.text || '').trim();
   const rawModel = directModel || fromSuggestions?.model;
   const model = rawModel || provider;
-  const confidence = directConfidence ?? fromSuggestions?.confidence ?? 0.0;
+  // Keep a score and its provenance on the same payload; never borrow a tag from another candidate.
+  const directScore = useDirectText ? selfReportedConfidence(directConfidence, directConfidenceSource) : undefined;
+  const candidateScore = fromSuggestions && providerCandidateSucceeded(line, provider, fromSuggestions.status, fromSuggestions.model) &&
+    normalizeForComparison(fromSuggestions.text) === normalizeForComparison(text)
+    ? selfReportedConfidence(fromSuggestions.confidence, fromSuggestions.confidenceSource) : undefined;
   const decision = directDecision || fromSuggestions?.decision || 'KEEP_RAW';
 
   const wasTriggered = Boolean(
-    line.correctionApplied ||
-    (line.correctedText && line.correctedText !== line.rawOcrText) ||
-    line.groqStatus ||
-    line.geminiStatus ||
-    line.groqSuggestion ||
-    line.geminiSuggestion ||
-    (Array.isArray(line.suggestions) && line.suggestions.some((s) => s.provider === provider))
+    (provider === 'GROQ' && (line.correctionApplied || (line.correctedText && line.correctedText !== line.rawOcrText))) ||
+    directStatus ||
+    directText ||
+    (Array.isArray(line.suggestions) && line.suggestions.some((s) => s?.provider === provider))
   );
 
-  const rawStatus = (directStatus || fromSuggestions?.status || '').toUpperCase();
+  const rawStatus = normalizedStatus(directStatus ?? fromSuggestions?.status);
   let status: 'SUCCESS' | 'NOT_TRIGGERED' | 'UNAVAILABLE' | 'DISABLED' | 'ERROR';
 
   // Respect explicit provider status FIRST — do not override UNAVAILABLE/ERROR/DISABLED
   // just because suggestion text happens to be present (it could be stale/cached).
-  if (rawStatus === 'UNAVAILABLE') {
+  if (providerEvidenceRejected(line, provider) || isLocalAdvisor(directModel) || isLocalAdvisor(fromSuggestions?.model) || rawStatus === 'UNAVAILABLE') {
     status = 'UNAVAILABLE';
   } else if (rawStatus === 'DISABLED') {
     status = 'DISABLED';
   } else if (rawStatus === 'ERROR') {
     status = 'ERROR';
-  } else if (text.length > 0) {
+  } else if (rawStatus === 'NOT_TRIGGERED' || rawStatus === 'SKIPPED') {
+    status = 'NOT_TRIGGERED';
+  } else if (rawStatus === 'SUCCESS' && text.length > 0) {
     status = 'SUCCESS';
   } else if (wasTriggered) {
     status = 'UNAVAILABLE';
@@ -104,8 +146,8 @@ export function buildAdvisorView(
     provider,
     model,
     status,
-    text,
-    confidence,
+    text: status === 'SUCCESS' ? text : '',
+    confidence: status === 'SUCCESS' ? directScore ?? candidateScore : undefined,
     decision,
     wasTriggered,
   };
@@ -147,16 +189,18 @@ export function buildVisibleSuggestions(
   const includeConfirmedCard = options?.includeConfirmedCard ?? true;
   const rawOcr = line.rawOcrText || line.predictedText || '';
   const normRaw = normalizeForComparison(rawOcr);
+  const groqView = buildAdvisorView(line, 'GROQ');
+  const geminiView = buildAdvisorView(line, 'GEMINI');
 
   const rawCandidates: SuggestionCandidate[] = [];
 
   // 1. Collect from line.suggestions array if provided (supports multiple candidates per provider)
   if (Array.isArray(line.suggestions)) {
     for (const s of line.suggestions) {
-      if (s && s.text && s.text.trim().length > 0 && s.status !== 'UNAVAILABLE') {
+      if (s && s.text && s.text.trim().length > 0 && providerCandidateSucceeded(line, s.provider, s.status, s.model)) {
         rawCandidates.push({
           text: s.text,
-          confidence: s.confidence,
+          confidence: selfReportedConfidence(s.confidence, s.confidenceSource),
           decision: s.decision,
           providerInternal: s.provider,
           sourceInternal: s.model,
@@ -166,11 +210,11 @@ export function buildVisibleSuggestions(
   }
 
   // 2. Direct field fallback for Groq / legacy
-  const rawGroqText = line.groqSuggestion ?? (line.correctedText && line.groqStatus !== 'UNAVAILABLE' ? line.correctedText : undefined);
-  if (rawGroqText && rawGroqText.trim().length > 0 && line.groqStatus !== 'UNAVAILABLE') {
+  const rawGroqText = line.groqSuggestion ?? line.correctedText;
+  if (rawGroqText && rawGroqText.trim().length > 0 && groqView.status === 'SUCCESS' && providerCandidateSucceeded(line, 'GROQ', line.groqStatus, line.groqModel)) {
     rawCandidates.push({
       text: rawGroqText,
-      confidence: line.groqConfidence,
+      confidence: selfReportedConfidence(line.groqConfidence, line.groqConfidenceSource),
       decision: line.groqDecision,
       providerInternal: 'GROQ',
     });
@@ -178,10 +222,10 @@ export function buildVisibleSuggestions(
 
   // 3. Direct field fallback for Gemini
   const rawGeminiText = line.geminiSuggestion;
-  if (rawGeminiText && rawGeminiText.trim().length > 0 && line.geminiStatus !== 'UNAVAILABLE') {
+  if (rawGeminiText && rawGeminiText.trim().length > 0 && geminiView.status === 'SUCCESS' && providerCandidateSucceeded(line, 'GEMINI', line.geminiStatus, line.geminiModel)) {
     rawCandidates.push({
       text: rawGeminiText,
-      confidence: line.geminiConfidence,
+      confidence: selfReportedConfidence(line.geminiConfidence, line.geminiConfidenceSource),
       decision: line.geminiDecision,
       providerInternal: 'GEMINI',
     });
@@ -199,7 +243,12 @@ export function buildVisibleSuggestions(
     }
 
     // Rule B: If duplicate of an earlier surviving suggestion -> hide it
-    if (seenNorms.includes(normCand)) {
+    const duplicateIndex = seenNorms.indexOf(normCand);
+    if (duplicateIndex >= 0) {
+      const existing = visible[duplicateIndex];
+      if (existing.provider === cand.providerInternal && existing.confidence === undefined && cand.confidence !== undefined) {
+        existing.confidence = cand.confidence;
+      }
       continue;
     }
 
@@ -229,8 +278,6 @@ export function buildVisibleSuggestions(
   // C. independent exact consensus + strong visual evidence -> 'Đề xuất tin cậy cao' allowed
   // D. provider outage -> no strong badge
   if (visible.length === 1 && !visible[0].isAiConfirmed) {
-    const groqView = buildAdvisorView(line, 'GROQ');
-    const geminiView = buildAdvisorView(line, 'GEMINI');
     const groqSuccess = groqView.status === 'SUCCESS';
     const geminiSuccess = geminiView.status === 'SUCCESS';
     const noOutage = groqView.status !== 'UNAVAILABLE' && geminiView.status !== 'UNAVAILABLE';
@@ -257,25 +304,19 @@ export function buildVisibleSuggestions(
   // and confirmed OCR is accurate, provide a real suggestion card labeled "Gợi ý 1" with badge "AI xác nhận".
   // RULE: Only allowed if at least one real provider call SUCCEEDED. Never fabricate AI confirmation.
   if (visible.length === 0 && includeConfirmedCard && rawOcr) {
-    const groqView = buildAdvisorView(line, 'GROQ');
-    const geminiView = buildAdvisorView(line, 'GEMINI');
-    const groqSuccess = groqView.status === 'SUCCESS';
-    const geminiSuccess = geminiView.status === 'SUCCESS';
-    const hasSuccessfulProvider =
-      groqSuccess ||
-      geminiSuccess ||
-      (Array.isArray(line.suggestions) && line.suggestions.some((s) => s.status === 'SUCCESS'));
-
-    if (hasSuccessfulProvider) {
+    const confirmedView = [groqView, geminiView].find(
+      (view) => view.status === 'SUCCESS' && normalizeForComparison(view.text) === normRaw
+    );
+    if (confirmedView) {
       visible.push({
         id: 'sugg-1',
         label: 'Gợi ý 1',
         buttonLabel: 'Dùng gợi ý 1',
         accessibilityLabel: 'Chọn gợi ý 1',
         text: rawOcr,
-        confidence: groqView.confidence || geminiView.confidence || line.rawOcrConfidence,
-        decision: groqView.decision || geminiView.decision || 'KEEP_RAW',
-        provider: groqSuccess ? 'GROQ' : (geminiSuccess ? 'GEMINI' : undefined),
+        confidence: confirmedView.confidence,
+        decision: confirmedView.decision || 'KEEP_RAW',
+        provider: confirmedView.provider,
         isAiConfirmed: true,
         badge: 'AI xác nhận',
       });
@@ -302,12 +343,10 @@ export function getLineReviewStatus(line: Partial<MultilineLineResult>): LineRev
   const groqView = buildAdvisorView(line, 'GROQ');
   const geminiView = buildAdvisorView(line, 'GEMINI');
 
-  const groqSuccess = groqView.status === 'SUCCESS';
-  const geminiSuccess = geminiView.status === 'SUCCESS';
-  const hasSuggestionSuccess =
-    Array.isArray(line.suggestions) && line.suggestions.some((s) => s.status === 'SUCCESS');
-
-  if (groqSuccess || geminiSuccess || hasSuggestionSuccess) {
+  const rawOcr = normalizeForComparison(line.rawOcrText || line.predictedText);
+  if (rawOcr && [groqView, geminiView].some(
+    (view) => view.status === 'SUCCESS' && normalizeForComparison(view.text) === rawOcr
+  )) {
     return 'AI_CONFIRMED';
   }
 
@@ -720,7 +759,7 @@ export function assertLegalCurrentText(state: LineDisplayState, manualText?: str
 export function resolveLineDisplayState(line: Partial<MultilineLineResult>): LineDisplayState {
   // 1. ocrText: Immutable raw OCR text (fallback to predictedText only if rawOcrText is absent)
   const rawOcrText = (line.rawOcrText || line.predictedText || '').trim();
-  const rawOcrConfidence = line.rawOcrConfidence;
+  const rawOcrConfidence = getRawOcrConfidence(line);
   const rawOcrConfidenceSource: OcrConfidenceSource =
     typeof rawOcrConfidence === 'number' && !isNaN(rawOcrConfidence) ? 'CRNN_CTC_SOFTMAX' : 'NONE';
   const ocrText = rawOcrText;
@@ -750,7 +789,7 @@ export function resolveLineDisplayState(line: Partial<MultilineLineResult>): Lin
       : undefined;
 
   let aiConfidenceSource: AiConfidenceSource = 'NONE';
-  if (firstSugg) {
+  if (firstSugg && rawAiConfidence !== undefined) {
     if (firstSugg.provider === 'GROQ') aiConfidenceSource = 'GROQ_SELF_REPORTED';
     else if (firstSugg.provider === 'GEMINI') aiConfidenceSource = 'GEMINI_SELF_REPORTED';
   }
@@ -765,7 +804,7 @@ export function resolveLineDisplayState(line: Partial<MultilineLineResult>): Lin
     normalizeForComparison(line.groqSuggestion) !== normalizeForComparison(ocrText)
   );
 
-  if (hasMultiProviderConsensus) {
+  if (hasMultiProviderConsensus && rawAiConfidence !== undefined) {
     aiConfidenceSource = 'MULTI_PROVIDER';
   }
 

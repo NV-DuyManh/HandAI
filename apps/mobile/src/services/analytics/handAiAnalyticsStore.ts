@@ -1,12 +1,19 @@
 import * as SecureStore from 'expo-secure-store';
+import * as FileSystem from 'expo-file-system/legacy';
 import { Platform } from 'react-native';
-import { MultilineTrialResult } from '../api/OcrPilotService';
+import { MultilineTrialResult, OcrPilotService } from '../api/OcrPilotService';
+import { getRawOcrConfidence } from '../../utils/ocrConfidence';
+import { buildAdvisorView, resolveLineDisplayState } from '../../utils/suggestionDedupe';
 
 export type { MultilineTrialResult };
 
 export type CorrectionType = 'OCR_CORRECT' | 'AI_CORRECTED' | 'MANUAL_CORRECTED' | 'FAILED';
 
 export type GroundTruthStatus = 'EXPLICIT' | 'USER_CONFIRMED' | 'FALLBACK' | 'MISSING';
+
+const normalizeEvaluationText = (text: string): string => text.normalize('NFC').trim().replace(/\s+/g, ' ');
+const hasExplicitReference = (line: LineMetric): boolean => line.evaluationStatus === 'EVALUATED'
+  && (line.groundTruthStatus === 'EXPLICIT' || line.referenceSource === 'EXPLICIT_REFERENCE') && Boolean(line.groundTruth?.trim());
 
 export type SystemVariant = 'CRNN_ONLY' | 'CRNN_AI' | 'CRNN_AI_HUMAN';
 
@@ -141,6 +148,12 @@ export interface RecognitionLineResult {
 }
 
 export interface LineMetric {
+  confidenceSource?: string;
+  referenceSource?: 'EXPLICIT_REFERENCE';
+  aiReviewRecorded?: boolean;
+  afterAiText?: string;
+  aiSuggestions?: { text: string; confidence?: number; confidenceSource?: string; provider?: string }[];
+  selectedSource?: string;
   lineIndex: number;
   lineId: string;
   line_id?: string;
@@ -589,6 +602,7 @@ export interface TrialAnalytics {
   trialId: string;
   timestamp: number;
   imageResolution?: string;
+  imageSha256?: string;
   modelVersion?: string;
   datasetVersion?: string;
   engineVersion?: string;
@@ -664,6 +678,7 @@ export interface TrialAnalytics {
 }
 
 export interface RecognitionSession {
+  imageSha256?: string;
   ablationBenchmark?: AblationBenchmarkResult;
   sessionId: string;
   formattedSessionId?: string; // User-facing recognition entry label, e.g. "Recognition #001"
@@ -1310,7 +1325,7 @@ export function computeErrorAnalysis(lines: LineMetric[]): ErrorAnalysisReport {
 
   lines.forEach((l) => {
     // Only evaluated lines are evaluated in Error Dashboard
-    if (l.evaluationStatus === 'SKIPPED') return;
+    if (!hasExplicitReference(l)) return;
 
     // If the line is 100% correct via raw OCR, no error occurred
     if (l.isCorrect && l.correctionType === 'OCR_CORRECT') return;
@@ -1676,60 +1691,127 @@ const STORAGE_KEY = 'handai_recognition_history_v3';
 const MAX_HISTORY_SESSIONS = 50; // Prevent unbounded storage growth
 
 const memoryStorage: Record<string, string> = {};
+const historyDirectory = () => FileSystem.documentDirectory
+  ? `${FileSystem.documentDirectory}handai-history/`
+  : null;
+const historyFile = (key: string) => `${historyDirectory()}${encodeURIComponent(key)}.json`;
+
+// Photos and full per-line results can exceed localStorage's small quota.
+function browserHistoryStorage(action: 'read' | 'write' | 'remove', key: string, value?: string): Promise<string | null> {
+  return new Promise((resolve, reject) => {
+    const opening = indexedDB.open('handai-recognition-history', 1);
+    opening.onupgradeneeded = () => opening.result.createObjectStore('entries');
+    opening.onerror = () => reject(opening.error);
+    opening.onsuccess = () => {
+      const database = opening.result;
+      const transaction = database.transaction('entries', action === 'read' ? 'readonly' : 'readwrite');
+      const entries = transaction.objectStore('entries');
+      const request = action === 'read' ? entries.get(key) : action === 'write' ? entries.put(value, key) : entries.delete(key);
+      let result: string | null = null;
+      request.onsuccess = () => { if (typeof request.result === 'string') result = request.result; };
+      transaction.oncomplete = () => { database.close(); resolve(result); };
+      transaction.onerror = transaction.onabort = () => { database.close(); reject(transaction.error); };
+    };
+  });
+}
 
 async function getStorageItem(key: string): Promise<string | null> {
-  try {
-    if (Platform.OS === 'web') {
-      if (typeof window !== 'undefined' && window.localStorage) {
-        return window.localStorage.getItem(key);
-      }
-      return memoryStorage[key] ?? null;
+  if (Platform.OS === 'web') {
+    if (typeof indexedDB !== 'undefined') {
+      const stored = await browserHistoryStorage('read', key);
+      if (stored !== null) return stored;
     }
-    const val = await SecureStore.getItemAsync(key);
-    if (val !== null && val !== undefined) return val;
-    return memoryStorage[key] ?? null;
-  } catch {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      return window.localStorage.getItem(key);
+    }
     return memoryStorage[key] ?? null;
   }
+  if (historyDirectory()) {
+    const file = historyFile(key);
+    if ((await FileSystem.getInfoAsync(file)).exists) {
+      return FileSystem.readAsStringAsync(file);
+    }
+  }
+  // Read older installations once; history JSON can exceed SecureStore's size limit.
+  return (await SecureStore.getItemAsync(key)) ?? memoryStorage[key] ?? null;
 }
 
 async function setStorageItem(key: string, value: string): Promise<void> {
-  memoryStorage[key] = value;
-  try {
-    if (Platform.OS === 'web') {
-      if (typeof window !== 'undefined' && window.localStorage) {
-        window.localStorage.setItem(key, value);
-      }
-      return;
+  if (Platform.OS === 'web') {
+    if (typeof indexedDB !== 'undefined') {
+      await browserHistoryStorage('write', key, value);
+    } else if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.setItem(key, value);
     }
+  } else if (historyDirectory()) {
+    await FileSystem.makeDirectoryAsync(historyDirectory()!, { intermediates: true });
+    await FileSystem.writeAsStringAsync(historyFile(key), value);
+  } else if (process.env.NODE_ENV !== 'test') {
     await SecureStore.setItemAsync(key, value);
-  } catch {
-    // ignore storage error
   }
+  memoryStorage[key] = value;
 }
 
 async function removeStorageItem(key: string): Promise<void> {
-  delete memoryStorage[key];
-  try {
-    if (Platform.OS === 'web') {
-      if (typeof window !== 'undefined' && window.localStorage) {
-        window.localStorage.removeItem(key);
-      }
-      return;
+  if (Platform.OS === 'web') {
+    if (typeof indexedDB !== 'undefined') await browserHistoryStorage('remove', key);
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.removeItem(key);
     }
+  } else {
+    if (historyDirectory()) await FileSystem.deleteAsync(historyFile(key), { idempotent: true });
     await SecureStore.deleteItemAsync(key);
-  } catch {
-    // ignore storage error
   }
+  delete memoryStorage[key];
 }
 
-// Default benchmark reliability calibration (4 bins for backward compatibility)
-const DEFAULT_RELIABILITY: ConfidenceReliabilityBin[] = [
-  { range: '90–100%', min: 90, max: 100, samples: 215, correctSamples: 196, totalCount: 215, correctCount: 196, totalLines: 215, correctLines: 196, accuracy: 91.2 },
-  { range: '80–89%', min: 80, max: 89, samples: 175, correctSamples: 144, totalCount: 175, correctCount: 144, totalLines: 175, correctLines: 144, accuracy: 82.3 },
-  { range: '70–79%', min: 70, max: 79, samples: 65, correctSamples: 46, totalCount: 65, correctCount: 46, totalLines: 65, correctLines: 46, accuracy: 70.8 },
-  { range: '< 70%', min: 0, max: 69, samples: 45, correctSamples: 23, totalCount: 45, correctCount: 23, totalLines: 45, correctLines: 23, accuracy: 51.1 },
-];
+function sessionImageUri(session: RecognitionSession): string {
+  return (session.imageUri || session.imageThumbnailUri || session.thumbnailUri || '').trim();
+}
+
+function hasStoredRecognition(session: RecognitionSession): boolean {
+  return Boolean(session.rawOcrText?.trim() || session.rawOcrPreview?.trim()
+    || session.lineMetrics?.some((line) => (line.ocrOutput || line.modelOutput || line.ocrText || '').trim()));
+}
+
+async function hasUsableHistoryImage(session: RecognitionSession): Promise<boolean> {
+  const uri = sessionImageUri(session);
+  if (!uri) return false;
+  if (Platform.OS !== 'web' && uri.startsWith('file:')) {
+    try {
+      return (await FileSystem.getInfoAsync(uri)).exists;
+    } catch {
+      // A transient read error does not establish that the photo was deleted.
+      return true;
+    }
+  }
+  if (Platform.OS === 'web' && uri.startsWith('blob:')) {
+    try { return (await fetch(uri)).ok; } catch { return false; }
+  }
+  return true;
+}
+
+async function persistHistoryImage(uri: string | undefined, trialId: string): Promise<string | undefined> {
+  if (!uri) return undefined;
+  if (Platform.OS === 'web') {
+    if (!uri.startsWith('blob:')) return uri;
+    const blob = await (await fetch(uri)).blob();
+    return new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  }
+  const directory = historyDirectory();
+  if (!directory || !/^(file|content):/.test(uri)) return uri;
+  if (uri.startsWith(directory)) return uri;
+  await FileSystem.makeDirectoryAsync(directory, { intermediates: true });
+  const extension = uri.match(/\.(png|jpe?g|webp|heic)(?:[?#]|$)/i)?.[1] || 'jpg';
+  const image = `${directory}image_${encodeURIComponent(trialId)}.${extension}`;
+  await FileSystem.copyAsync({ from: uri, to: image });
+  return image;
+}
 
 // TASK 2: Default 5-Range Confidence Calibration Record
 export const DEFAULT_CONFIDENCE_CALIBRATION: ConfidenceCalibrationRecord[] = [
@@ -1880,33 +1962,59 @@ export class HandAiAnalyticsStore {
   private datasetVersions: DatasetVersion[] = [...DEFAULT_DATASET_VERSIONS];
   private modelExperiments: ModelExperiment[] = [...DEFAULT_MODEL_EXPERIMENTS];
   private isLoaded = false;
+  private loading: Promise<void> | null = null;
+  private listeners = new Set<() => void>();
+
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => { this.listeners.delete(listener); };
+  }
+
+  private notify(): void {
+    this.listeners.forEach((listener) => listener());
+  }
 
   async init(): Promise<void> {
     if (this.isLoaded) return;
-    try {
-      const stored = await getStorageItem(STORAGE_KEY);
-      if (stored) {
-        const parsed: RecognitionSession[] = JSON.parse(stored);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          // Filter out any corrupted or 0-line unconfirmed sessions from storage
-          this.sessions = parsed
-            .filter(
-              (s) => s.status === 'COMPLETED' && (s.confirmedLines ?? s.totalLines) > 0 && s.totalLines > 0
-            )
-            .map((s) => ({
-              ...s,
-              sessionId: s.sessionId || `session_${Date.now()}`,
-              datasetVersion: s.datasetVersion || 'HandAI-v1.2',
-              modelVersion: s.modelVersion || 'CRNN-v1.2-PyTorch',
-              experimentId: s.experimentId || 'exp_crnn_v1_2',
-            }));
+    if (this.loading) return this.loading;
+    this.loading = (async () => {
+      try {
+        const stored = await getStorageItem(STORAGE_KEY);
+        if (stored !== null) {
+          const parsed: RecognitionSession[] = JSON.parse(stored);
+          if (!Array.isArray(parsed)) throw new Error('Invalid recognition history');
+          const retained: RecognitionSession[] = [];
+          const removedIds: string[] = [];
+          for (const session of parsed) {
+            const completed = session && typeof session.sessionId === 'string'
+              && session.status === 'COMPLETED' && (session.confirmedLines ?? session.totalLines) > 0
+              && session.totalLines > 0;
+            const reviewable = completed && (session.isSampleData === true
+              || (hasStoredRecognition(session) && await hasUsableHistoryImage(session)));
+            if (reviewable) {
+              if (session.isSampleData !== true) {
+                const imageUri = await persistHistoryImage(sessionImageUri(session), session.sessionId);
+                retained.push({ ...session, imageUri, imageThumbnailUri: imageUri, thumbnailUri: imageUri });
+              } else retained.push(session);
+            }
+            else if (session?.sessionId) removedIds.push(session.sessionId);
+          }
+          // Saving [] is intentional: clearing history must survive restarting the app.
+          await setStorageItem(STORAGE_KEY, JSON.stringify(retained));
+          this.sessions = retained;
+          await Promise.all(removedIds.map((id) => removeStorageItem(`trial_analytics_${id}`)));
+          OcrPilotService.removeCachedTrials(removedIds);
         }
+        this.isLoaded = true;
+        this.notify();
+      } catch (e) {
+        console.warn('[HandAiAnalytics] Failed to load history from storage:', e);
+        throw e;
+      } finally {
+        this.loading = null;
       }
-    } catch (e) {
-      console.warn('[HandAiAnalytics] Failed to load history from storage:', e);
-    } finally {
-      this.isLoaded = true;
-    }
+    })();
+    return this.loading;
   }
 
   /**
@@ -1921,7 +2029,6 @@ export class HandAiAnalyticsStore {
     let aiCorrected = 0;
     let manualEdited = 0;
     let validLinesCount = 0;
-    let confidenceSum = 0;
     let highConf = 0;
     let midConf = 0;
     let lowConf = 0;
@@ -1955,11 +2062,14 @@ export class HandAiAnalyticsStore {
     };
 
     rawLines.forEach((l, idx) => {
+      const display = resolveLineDisplayState(l);
+      const advisors = [buildAdvisorView(l, 'GROQ'), buildAdvisorView(l, 'GEMINI')];
+      const realAdvisors = advisors.filter((item) => item.status === 'SUCCESS' && item.model !== item.provider && item.model !== 'Local-Advisor');
       const ocrText = (l.rawOcrText || (l as any).ocrText || (l as any).rawText || l.predictedText || '').trim();
       const firstSugg =
         (l.suggestions && l.suggestions.length > 0 ? (l.suggestions[0].text || '').trim() : '') ||
         (((l as any).aiSuggestedText || (l as any).aiCandidate || (l as any).aiSuggestion || '') as string).trim();
-      const currentText = (l.currentText || l.finalText || (l as any).text || ocrText).trim();
+      const currentText = (l.currentText || display.currentText || l.finalText || (l as any).text || ocrText).trim();
       const groundTruth = ((l as any).groundTruth || (l as any).verifiedText || (l as any).expectedText || '').trim();
 
       // PART 5: FIX EMPTY OCR RESULT
@@ -1995,36 +2105,23 @@ export class HandAiAnalyticsStore {
         return;
       }
 
-      const selectedSource = (l.selectedSource || '').toUpperCase();
       const verdict = (l.verdict || (l as any).feedbackVerdict || '').toUpperCase();
 
       let groundTruthStatus: GroundTruthStatus = 'MISSING';
       if (groundTruth.length > 0) {
         groundTruthStatus = 'EXPLICIT';
-      } else if (verdict === 'CORRECT' || verdict === 'CONFIRMED' || verdict === 'ACCEPTED' || verdict === 'MANUAL_EDIT' || verdict === 'WRONG' || verdict === 'REJECTED' || verdict === 'FAILED' || verdict === 'INCORRECT' || verdict === 'AI_CORRECTED' || verdict === 'OCR_CORRECT' || verdict === 'CORRECTED') {
-        groundTruthStatus = 'USER_CONFIRMED';
-      } else if (isCompleted && ((l as any).confirmed === true || (l as any).userConfirmed === true)) {
-        groundTruthStatus = 'USER_CONFIRMED';
-      } else if (currentText.length > 0) {
-        groundTruthStatus = 'FALLBACK';
       }
 
-      const isResearchValid = groundTruthStatus === 'EXPLICIT' || groundTruthStatus === 'USER_CONFIRMED';
+      const isResearchValid = groundTruthStatus === 'EXPLICIT';
 
       if (isResearchValid) {
         validLinesCount++;
       }
 
-      // Confidence normalization (0 - 100)
-      let conf =
-        typeof l.confidence === 'number'
-          ? l.confidence
-          : typeof l.rawOcrConfidence === 'number'
-          ? l.rawOcrConfidence
-          : 0.88;
-      if (conf <= 1) conf = Math.round(conf * 100);
-      if (isResearchValid) {
-        confidenceSum += conf;
+      // Only a tagged, actual OCR measurement belongs in the reported confidence.
+      const rawScore = getRawOcrConfidence(l);
+      const conf = rawScore === undefined ? Number.NaN : Math.round(rawScore * 1000) / 10;
+      if (Number.isFinite(conf)) {
         if (conf >= 85) highConf++;
         else if (conf >= 70) midConf++;
         else lowConf++;
@@ -2043,9 +2140,9 @@ export class HandAiAnalyticsStore {
 
       // TASK 2: Ground Truth Evaluation Logic
       if (groundTruth.length > 0) {
-        const normOcr = ocrText.toLowerCase().replace(/\s+/g, ' ');
-        const normFinal = currentText.toLowerCase().replace(/\s+/g, ' ');
-        const normTruth = groundTruth.toLowerCase().replace(/\s+/g, ' ');
+        const normOcr = normalizeEvaluationText(ocrText);
+        const normFinal = normalizeEvaluationText(currentText);
+        const normTruth = normalizeEvaluationText(groundTruth);
 
         isRawCorrect = normOcr === normTruth;
         isFinalCorrect = normFinal === normTruth;
@@ -2063,18 +2160,6 @@ export class HandAiAnalyticsStore {
           isRawCorrect = false;
           isFinalCorrect = false;
           correctionType = 'FAILED';
-        } else if (source === 'AI_CORRECTION') {
-          isRawCorrect = false;
-          isFinalCorrect = true;
-          correctionType = 'AI_CORRECTED';
-        } else if (source === 'MANUAL') {
-          isRawCorrect = false;
-          isFinalCorrect = true;
-          correctionType = 'MANUAL_CORRECTED';
-        } else {
-          isRawCorrect = true;
-          isFinalCorrect = true;
-          correctionType = 'OCR_CORRECT';
         }
       }
 
@@ -2084,14 +2169,17 @@ export class HandAiAnalyticsStore {
         if (correctionType === 'AI_CORRECTED' && isFinalCorrect) aiCorrected++;
         if (correctionType === 'MANUAL_CORRECTED' && isFinalCorrect) manualEdited++;
 
-        // Reliability bin accumulation
+      }
+
+      if (isResearchValid && Number.isFinite(conf)) {
+        // Reliability compares the original OCR score with original OCR correctness.
         let binKey = '< 70%';
         if (conf >= 90) binKey = '90–100%';
         else if (conf >= 80) binKey = '80–89%';
         else if (conf >= 70) binKey = '70–79%';
 
         binCounts[binKey].total++;
-        if (isFinalCorrect) binCounts[binKey].correct++;
+        if (isRawCorrect) binCounts[binKey].correct++;
 
         // TASK 2: 5-bin calibration accumulation
         let calibKey = '<60%';
@@ -2101,61 +2189,60 @@ export class HandAiAnalyticsStore {
         else if (conf >= 60) calibKey = '60-69%';
 
         calib5Bins[calibKey].total++;
-        if (isFinalCorrect) calib5Bins[calibKey].correct++;
+        if (isRawCorrect) calib5Bins[calibKey].correct++;
       }
 
       // Mandatory groundTruth assignment
-      const mandatoryGroundTruth = (
-        groundTruth ||
-        (isCompleted ? currentText : (l.verdict === 'CORRECT' ? ocrText : currentText))
-      ).trim();
+      const mandatoryGroundTruth = groundTruth;
+      const metricOcr = normalizeEvaluationText(ocrText);
+      const metricFinal = normalizeEvaluationText(currentText);
+      const metricTruth = normalizeEvaluationText(mandatoryGroundTruth);
 
-      const { cer: lineCer, cerPercent: lineCerPercent, charAccuracy: lineCharAccuracy } = calculateCer(
-        ocrText,
-        mandatoryGroundTruth
+      const { cerPercent: lineCerPercent, charAccuracy: lineCharAccuracy } = calculateCer(
+        metricOcr,
+        metricTruth
       );
       if (isResearchValid) {
-        totalLevenshteinDist += computeLevenshteinDistance(ocrText, mandatoryGroundTruth);
-        totalRefCharCount += mandatoryGroundTruth.length;
+        totalLevenshteinDist += computeLevenshteinDistance(metricOcr, metricTruth);
+        totalRefCharCount += metricTruth.length;
         // BUG 2 FIX: Accumulate finalText vs groundTruth distances for real finalCer/finalWer
-        finalLevenshteinDist += computeLevenshteinDistance(currentText, mandatoryGroundTruth);
+        finalLevenshteinDist += computeLevenshteinDistance(metricFinal, metricTruth);
       }
 
       const {
-        wer: lineWer,
         werPercent: lineWerPercent,
         wordAccuracy: lineWordAccuracy,
         predictedWords: linePredWords,
         referenceWords: lineRefWords,
         wordDistance: lineWordDist,
-      } = calculateWer(ocrText, mandatoryGroundTruth);
+      } = calculateWer(metricOcr, metricTruth);
       
       if (isResearchValid) {
         totalWordEditDist += lineWordDist;
         totalRefWordCount += lineRefWords.length;
         // BUG 2 FIX: Accumulate finalText word distance
-        const { wordDistance: finalWordDist } = calculateWer(currentText, mandatoryGroundTruth);
+        const { wordDistance: finalWordDist } = calculateWer(metricFinal, metricTruth);
         finalWordEditDist += finalWordDist;
 
         // Baseline B (CRNN + AI): Compare (firstSugg || ocrText) vs mandatoryGroundTruth
         const bPred = (firstSugg || ocrText || '').trim();
-        const normBPred = bPred.toLowerCase().replace(/\s+/g, ' ');
-        const normTruth = mandatoryGroundTruth.toLowerCase().replace(/\s+/g, ' ');
+        const normBPred = normalizeEvaluationText(bPred);
+        const normTruth = metricTruth;
         if (normBPred === normTruth) baseBRawCorrect++;
-        baseBLevenshteinDist += computeLevenshteinDistance(bPred, mandatoryGroundTruth);
-        baseBWordEditDist += calculateWer(bPred, mandatoryGroundTruth).wordDistance;
+        baseBLevenshteinDist += computeLevenshteinDistance(normBPred, normTruth);
+        baseBWordEditDist += calculateWer(normBPred, normTruth).wordDistance;
       }
 
       const evalStatus: 'EVALUATED' | 'PENDING' | 'SKIPPED' =
-        isCompleted || verdict.length > 0 || groundTruth.length > 0 ? 'EVALUATED' : 'PENDING';
+        isResearchValid ? 'EVALUATED' : 'PENDING';
 
-      const lineError = classifyLineError(
-        ocrText,
-        mandatoryGroundTruth,
+      const lineError = isResearchValid ? classifyLineError(
+        metricOcr,
+        metricTruth,
         conf,
         status,
         isRawCorrect
-      );
+      ) : undefined;
 
       lineMetrics.push({
         lineIndex: idx + 1,
@@ -2169,16 +2256,25 @@ export class HandAiAnalyticsStore {
         finalResult: currentText || '(Empty)',
         groundTruth: mandatoryGroundTruth,
         evaluationStatus: evalStatus,
-        cer: lineCerPercent,
-        characterAccuracy: lineCharAccuracy,
+        cer: isResearchValid ? lineCerPercent : Number.NaN,
+        characterAccuracy: isResearchValid ? lineCharAccuracy : Number.NaN,
         referenceWords: lineRefWords,
         predictedWords: linePredWords,
-        wer: lineWerPercent,
-        wordAccuracy: lineWordAccuracy,
-        WER: lineWerPercent,
-        WordAccuracy: lineWordAccuracy,
+        wer: isResearchValid ? lineWerPercent : Number.NaN,
+        wordAccuracy: isResearchValid ? lineWordAccuracy : Number.NaN,
+        WER: isResearchValid ? lineWerPercent : Number.NaN,
+        WordAccuracy: isResearchValid ? lineWordAccuracy : Number.NaN,
         errorAnalysis: lineError,
         confidence: conf,
+        confidenceSource: rawScore === undefined ? undefined : 'CRNN_CTC_SOFTMAX',
+        referenceSource: groundTruth.length > 0 ? 'EXPLICIT_REFERENCE' : undefined,
+        aiReviewRecorded: realAdvisors.length > 0,
+        afterAiText: realAdvisors.length === 0 ? undefined :
+          realAdvisors.every((item) => item.text === realAdvisors[0].text) ? realAdvisors[0].text :
+          realAdvisors.find((item) => item.text === display.currentText)?.text,
+        aiSuggestions: display.aiSuggestions.map((item) => ({ text: item.text, confidence: item.confidence, provider: item.provider,
+          confidenceSource: item.confidence == null ? undefined : 'AI_SELF_REPORTED' })),
+        selectedSource: display.selectedSource,
         source,
         sourceDecision: decisionSource,
         decisionSource,
@@ -2196,27 +2292,32 @@ export class HandAiAnalyticsStore {
 
     const evaluatedLines = validLinesCount;
     // We only count correct final lines if they are research valid.
-    const correctFinalLines = lineMetrics.filter((m) => m.isCorrect && m.correctionType !== 'FAILED' && (m.groundTruthStatus === 'EXPLICIT' || m.groundTruthStatus === 'USER_CONFIRMED')).length;
+    const correctFinalLines = lineMetrics.filter((m) => hasExplicitReference(m) && m.isFinalCorrect).length;
 
     // TASK 2 Formula: correctFinalLines / evaluatedLines * 100
-    const rawAccuracy = evaluatedLines > 0 ? Math.round((rawCorrect / evaluatedLines) * 100) : 0;
-    const finalAccuracy = evaluatedLines > 0 ? Math.round((correctFinalLines / evaluatedLines) * 100) : 0;
+    const rawAccuracy = evaluatedLines > 0 ? Math.round((rawCorrect / evaluatedLines) * 100) : Number.NaN;
+    const finalAccuracy = evaluatedLines > 0 ? Math.round((correctFinalLines / evaluatedLines) * 100) : Number.NaN;
     const aiImprovement = Math.max(0, finalAccuracy - rawAccuracy);
-    const avgConfidence = evaluatedLines > 0 ? Math.round(confidenceSum / evaluatedLines) : 0;
+    const recordedConfidences = lineMetrics
+      .filter((line) => line.status !== 'Detection Failed' && line.confidenceSource === 'CRNN_CTC_SOFTMAX' && Number.isFinite(line.confidence))
+      .map((line) => line.confidence);
+    const avgConfidence = recordedConfidences.length > 0
+      ? Math.round(recordedConfidences.reduce((sum, value) => sum + value, 0) / recordedConfidences.length)
+      : Number.NaN;
 
     // CER & Character Accuracy calculations across evaluated lines
     const rawGlobalCer = totalRefCharCount > 0 ? (totalLevenshteinDist / totalRefCharCount) * 100 : 0;
     const safeRawGlobalCer = isNaN(rawGlobalCer) || !isFinite(rawGlobalCer) ? 0 : rawGlobalCer;
     const globalCer = +Math.min(100, safeRawGlobalCer).toFixed(1);
     const safeGlobalCer = isNaN(globalCer) || !isFinite(globalCer) ? 0 : globalCer;
-    const globalCharacterAccuracy = +(Math.max(0, 100 - safeGlobalCer)).toFixed(1);
+    const globalCharacterAccuracy = evaluatedLines > 0 ? +(Math.max(0, 100 - safeGlobalCer)).toFixed(1) : Number.NaN;
 
     // WER & Word Accuracy calculations across evaluated lines
     const rawGlobalWer = totalRefWordCount > 0 ? (totalWordEditDist / totalRefWordCount) * 100 : 0;
     const safeRawGlobalWer = isNaN(rawGlobalWer) || !isFinite(rawGlobalWer) ? 0 : rawGlobalWer;
     const globalWer = +Math.min(100, safeRawGlobalWer).toFixed(1);
     const safeGlobalWer = isNaN(globalWer) || !isFinite(globalWer) ? 0 : globalWer;
-    const globalWordAccuracy = +(Math.max(0, 100 - safeGlobalWer)).toFixed(1);
+    const globalWordAccuracy = evaluatedLines > 0 ? +(Math.max(0, 100 - safeGlobalWer)).toFixed(1) : Number.NaN;
 
     // --- Ablation Benchmarking ---
     const baseA_Accuracy = evaluatedLines > 0 ? Math.round((rawCorrect / evaluatedLines) * 100) : 0;
@@ -2473,9 +2574,9 @@ export class HandAiAnalyticsStore {
 
 
     // A missing backend latency is unavailable. Do not estimate a measurement.
-    const realLatency = (trial as any).totalLatencyMs || (trial as any).latencyMs;
-    const latencySeconds = realLatency
-      ? +(realLatency / 1000).toFixed(1)
+    const realLatency = trial.totalLatencyMs ?? (trial as any).latencyMs;
+    const latencySeconds = typeof realLatency === 'number' && Number.isFinite(realLatency) && realLatency >= 0
+      ? realLatency / 1000
       : 0;
 
     const funnel: PipelineFunnel = {
@@ -2641,14 +2742,20 @@ export class HandAiAnalyticsStore {
     trial: MultilineTrialResult
   ): Promise<{ session: RecognitionSession; analytics: TrialAnalytics }> {
     await this.init();
-    const analytics = this.computeTrialAnalytics(trial, true);
-
-    this.currentTrialAnalytics = analytics;
+    const previousSession = this.sessions.find((item) => item.sessionId === trial.trialId);
+    const savedReferences = new Map((previousSession?.lineMetrics || [])
+      .filter(hasExplicitReference).map((line) => [line.lineId, line.groundTruth]));
+    // Provider refreshes must retain independently entered references, never derive them from selected text.
+    const analytics = this.computeTrialAnalytics({ ...trial, lines: (trial.lines || []).map((line) =>
+      savedReferences.has(line.lineId) ? { ...line, groundTruth: savedReferences.get(line.lineId) } : line),
+    }, true);
 
     const validCompleted = this.getSessions();
     const sessionIndex = validCompleted.length + 1;
     const firstLine = analytics.lineMetrics?.[0];
-    const imageUri = (trial as any).imageUri || (trial as any).photoUri || (trial as any).originalUri || (trial as any).croppedUri;
+    const sourceImageUri = (trial as any).imageUri || (trial as any).photoUri || (trial as any).originalUri || (trial as any).croppedUri
+      || (previousSession && sessionImageUri(previousSession));
+    const imageUri = await persistHistoryImage(sourceImageUri, trial.trialId || `session_${Date.now()}`);
     const rawOcr = firstLine?.ocrOutput || firstLine?.modelOutput || firstLine?.ocrText || '';
     const aiSug = firstLine?.aiCandidate || firstLine?.aiSuggestion || '';
     const groundTruth = firstLine?.groundTruth || '';
@@ -2664,6 +2771,7 @@ export class HandAiAnalyticsStore {
       status: 'COMPLETED',
       imageUri,
       thumbnailUri: imageUri,
+      imageSha256: trial.pageImageSha256 || undefined,
       imageThumbnailUri: imageUri,
       rawOcrText: rawOcr,
       rawOcrPreview: rawOcr,
@@ -2718,22 +2826,28 @@ export class HandAiAnalyticsStore {
 
     // PART 4 & 6: Only register session if status == COMPLETED AND confirmedLines > 0 AND totalLines > 0
     if (session.status === 'COMPLETED' && session.confirmedLines > 0 && session.totalLines > 0) {
-      this.sessions = this.sessions.filter((s) => s.sessionId !== session.sessionId);
-      this.sessions.push(session);
-
+      let nextSessions = this.sessions.filter((s) => s.sessionId !== session.sessionId);
+      nextSessions.push(session);
       // Enforce history limit: keep most recent MAX_HISTORY_SESSIONS
-      if (this.sessions.length > MAX_HISTORY_SESSIONS) {
-        this.sessions.sort((a, b) => b.timestamp - a.timestamp);
-        this.sessions = this.sessions.slice(0, MAX_HISTORY_SESSIONS);
+      if (nextSessions.length > MAX_HISTORY_SESSIONS) {
+        nextSessions.sort((a, b) => b.timestamp - a.timestamp);
+        nextSessions = nextSessions.slice(0, MAX_HISTORY_SESSIONS);
       }
-
       try {
-        await setStorageItem(STORAGE_KEY, JSON.stringify(this.sessions));
-        if (analytics.trialId) {
-          await setStorageItem(`trial_analytics_${analytics.trialId}`, JSON.stringify(analytics));
-        }
+        await setStorageItem(STORAGE_KEY, JSON.stringify(nextSessions));
       } catch (e) {
         console.warn('[HandAiAnalytics] Failed to save session:', e);
+        throw e;
+      }
+      this.sessions = nextSessions;
+      this.currentTrialAnalytics = analytics;
+      this.notify();
+      if (analytics.trialId) {
+        try {
+          await setStorageItem(`trial_analytics_${analytics.trialId}`, JSON.stringify(analytics));
+        } catch (e) {
+          console.warn('[HandAiAnalytics] Saved history, but could not cache trial analytics:', e);
+        }
       }
     }
 
@@ -2753,10 +2867,12 @@ export class HandAiAnalyticsStore {
   }
 
   async getCurrentTrialAnalytics(trialId?: string): Promise<TrialAnalytics | null> {
+    await this.init();
     if (this.currentTrialAnalytics && (!trialId || this.currentTrialAnalytics.trialId === trialId)) {
       return this.currentTrialAnalytics;
     }
     if (trialId) {
+      if (!this.sessions.some((session) => session.sessionId === trialId)) return null;
       try {
         const stored = await getStorageItem(`trial_analytics_${trialId}`);
         if (stored) {
@@ -2764,7 +2880,7 @@ export class HandAiAnalyticsStore {
         }
       } catch {}
     }
-    return this.currentTrialAnalytics;
+    return trialId ? null : this.currentTrialAnalytics;
   }
 
   /**
@@ -2781,7 +2897,7 @@ export class HandAiAnalyticsStore {
    * Returns comprehensive Global Analytics across all completed sessions.
    */
   getGlobalAnalytics(): GlobalAnalytics {
-    const validSessions = this.getSessions();
+    const validSessions = this.getSessions().filter((session) => session.isSampleData !== true);
     if (validSessions.length === 0) {
       const activeDs = this.getActiveDatasetVersion();
       const emptyErrorDashboard: GlobalRealErrorAnalysis = {
@@ -2871,19 +2987,19 @@ export class HandAiAnalyticsStore {
         datasetQuality: this.getDatasetQualityCard(),
         activeDataset: activeDs,
         datasetVersions: this.getDatasetVersions(),
-        confidenceReliability: DEFAULT_RELIABILITY,
-        confidenceCalibration: DEFAULT_CONFIDENCE_CALIBRATION,
+        confidenceReliability: [],
+        confidenceCalibration: [],
         aiImpact: {
-          rawAccuracy: 68.8,
-          rawCer: 11.34,
-          rawWer: 26.50,
-          finalAccuracy: 81.3,
-          finalCer: 8.21,
-          finalWer: 20.15,
-          accuracyGain: 12.5,
-          totalOcrErrors: 5,
-          correctedErrors: 2,
-          rescueRate: 40.0,
+          rawAccuracy: Number.NaN,
+          rawCer: Number.NaN,
+          rawWer: Number.NaN,
+          finalAccuracy: Number.NaN,
+          finalCer: Number.NaN,
+          finalWer: Number.NaN,
+          accuracyGain: Number.NaN,
+          totalOcrErrors: 0,
+          correctedErrors: 0,
+          rescueRate: Number.NaN,
         },
         datasetDistribution: DEFAULT_DATASET_DISTRIBUTION,
         rootCauseAnalysis: {
@@ -2909,10 +3025,17 @@ export class HandAiAnalyticsStore {
     let abCount = 0;
 
     let totalLines = 0;
-    let totalRawCorrect = 0;
-    let totalFinalCorrect = 0;
-    let confidenceSum = 0;
-    let latencySum = 0;
+    const recordedLines = validSessions.flatMap((session) => session.lineMetrics || []).filter((line) => line.status !== 'Detection Failed');
+    const measuredLines = recordedLines.filter(hasExplicitReference);
+    const rawText = (line: LineMetric) => normalizeEvaluationText(line.ocrOutput || line.modelOutput || line.ocrText || '');
+    const finalText = (line: LineMetric) => normalizeEvaluationText(line.finalResult || line.finalText || line.text || '');
+    const referenceText = (line: LineMetric) => normalizeEvaluationText(line.groundTruth);
+    const totalRawCorrect = measuredLines.filter((line) => rawText(line) === referenceText(line)).length;
+    const totalFinalCorrect = measuredLines.filter((line) => finalText(line) === referenceText(line)).length;
+    const scores = recordedLines.filter((line) => line.confidenceSource === 'CRNN_CTC_SOFTMAX'
+      && Number.isFinite(line.confidence) && line.confidence >= 0 && line.confidence <= 100).map((line) => line.confidence);
+    const latencies = validSessions.map((session) => session.processingTimeSeconds)
+      .filter((value): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0);
     let crnn = 0;
     let aiCorrection = 0;
     let manual = 0;
@@ -2931,13 +3054,9 @@ export class HandAiAnalyticsStore {
 
     validSessions.forEach((s) => {
       totalLines += s.totalLines;
-      totalRawCorrect += s.rawCorrectLines ?? s.crnnRawCount;
-      totalFinalCorrect += s.correctLines;
-      confidenceSum += s.averageConfidence;
-      latencySum += s.processingTimeSeconds || 3.2;
-      crnn += s.crnnRawCount;
-      aiCorrection += s.aiCorrectionCount;
-      manual += s.manualEditCount;
+      crnn += (s.lineMetrics || []).filter((line) => line.decisionSource === 'CRNN_RAW').length;
+      aiCorrection += (s.lineMetrics || []).filter((line) => line.decisionSource === 'AI_CORRECTION').length;
+      manual += (s.lineMetrics || []).filter((line) => line.decisionSource === 'MANUAL_EDIT').length;
 
       if (s.ablationBenchmark) {
         abCount++;
@@ -2949,7 +3068,7 @@ export class HandAiAnalyticsStore {
       // Real error extraction from lineMetrics or errorRecords
       if (s.lineMetrics && s.lineMetrics.length > 0) {
         s.lineMetrics.forEach((lm) => {
-          if (lm.evaluationStatus === 'SKIPPED') return;
+          if (!hasExplicitReference(lm)) return;
           const ea = lm.errorAnalysis;
           if (ea && ea.errorType !== 'NO_ERROR') {
             switch (ea.errorType) {
@@ -2978,54 +3097,13 @@ export class HandAiAnalyticsStore {
             }
           }
         });
-      } else if (s.errorRecords && s.errorRecords.length > 0) {
-        s.errorRecords.forEach((er) => {
-          switch (er.errorType) {
-            case 'VIETNAMESE_TONE_ERROR': toneCount++; break;
-            case 'SIMILAR_CHARACTER_CONFUSION': similarCount++; break;
-            case 'MISSING_CHARACTER': missingCount++; break;
-            case 'LOW_IMAGE_QUALITY': qualityCount++; break;
-            case 'EXTRA_CHARACTER': extraCount++; break;
-            case 'WORD_SUBSTITUTION': wordSubCount++; break;
-            case 'SEGMENTATION_FAILURE': segFailCount++; break;
-          }
-          if (er.wrongCharacter && er.correctCharacter) {
-            const key = `${er.wrongCharacter} → ${er.correctCharacter}`;
-            const existing = pairFreqMap.get(key);
-            if (existing) {
-              existing.count++;
-            } else {
-              pairFreqMap.set(key, {
-                wrongCharacter: er.wrongCharacter,
-                correctCharacter: er.correctCharacter,
-                count: 1,
-              });
-            }
-          }
-        });
-      } else {
-        const sErrors = s.totalErrors ?? Math.max(0, s.totalLines - s.correctLines);
-        if (s.mainErrorType === 'VIETNAMESE_TONE_ERROR') toneCount += sErrors;
-        else if (s.mainErrorType === 'SIMILAR_CHARACTER_CONFUSION') similarCount += sErrors;
-        else if (s.mainErrorType === 'MISSING_CHARACTER') missingCount += sErrors;
-        else if (s.mainErrorType === 'LOW_IMAGE_QUALITY') qualityCount += sErrors;
-        else if (sErrors > 0) {
-          toneCount += Math.ceil(sErrors * 0.4);
-          similarCount += Math.round(sErrors * 0.3);
-          missingCount += Math.round(sErrors * 0.2);
-          qualityCount += Math.max(0, sErrors - Math.ceil(sErrors * 0.4) - Math.round(sErrors * 0.3) - Math.round(sErrors * 0.2));
-        }
       }
-
-      if (s.averageConfidence >= 85) high++;
-      else if (s.averageConfidence >= 70) mid++;
-      else low++;
     });
-
-    const rawAccuracy = Math.round((totalRawCorrect / Math.max(1, totalLines)) * 100);
-    const finalAccuracy = Math.round((totalFinalCorrect / Math.max(1, totalLines)) * 100);
-    const avgConfidence = +(confidenceSum / validSessions.length).toFixed(1);
-    const averageLatency = +(latencySum / validSessions.length).toFixed(1);
+    scores.forEach((score) => { if (score >= 85) high++; else if (score >= 70) mid++; else low++; });
+    const rawAccuracy = measuredLines.length > 0 ? Math.round((totalRawCorrect / measuredLines.length) * 100) : Number.NaN;
+    const finalAccuracy = measuredLines.length > 0 ? Math.round((totalFinalCorrect / measuredLines.length) * 100) : Number.NaN;
+    const avgConfidence = scores.length > 0 ? +(scores.reduce((sum, score) => sum + score, 0) / scores.length).toFixed(1) : Number.NaN;
+    const averageLatency = latencies.length > 0 ? +(latencies.reduce((sum, latency) => sum + latency, 0) / latencies.length).toFixed(1) : Number.NaN;
     const aiCorrectionRate = +((aiCorrection / Math.max(1, totalLines)) * 100).toFixed(1);
     const ocrAcceptedRate = +((crnn / Math.max(1, totalLines)) * 100).toFixed(1);
 
@@ -3040,30 +3118,14 @@ export class HandAiAnalyticsStore {
       timestamp: s.timestamp,
     }));
 
-    // Compute Global CER and Character Accuracy for completed sessions
-    let totalSessionsCer = 0;
-    let cerSessionCount = 0;
-    validSessions.forEach((s) => {
-      if (typeof s.cer === 'number' && !isNaN(s.cer) && isFinite(s.cer)) {
-        totalSessionsCer += s.cer;
-        cerSessionCount++;
-      }
-    });
-
-    const globalCer = cerSessionCount > 0 ? +(totalSessionsCer / cerSessionCount).toFixed(1) : 5.8;
+    const referenceCharacters = measuredLines.reduce((sum, line) => sum + referenceText(line).length, 0);
+    const rawCharacterEdits = measuredLines.reduce((sum, line) => sum + computeLevenshteinDistance(rawText(line), referenceText(line)), 0);
+    const referenceWordCount = measuredLines.reduce((sum, line) => sum + tokenizeWords(referenceText(line)).length, 0);
+    const rawWordEdits = measuredLines.reduce((sum, line) => sum + calculateWer(rawText(line), referenceText(line)).wordDistance, 0);
+    const globalCer = referenceCharacters > 0 ? +(rawCharacterEdits / referenceCharacters * 100).toFixed(1) : Number.NaN;
     const globalCharacterAccuracy = +(Math.max(0, 100 - globalCer)).toFixed(1);
 
-    // Compute Global WER and WER Trend for completed sessions
-    let totalSessionsWer = 0;
-    let werSessionCount = 0;
-    validSessions.forEach((s) => {
-      if (typeof s.wer === 'number' && !isNaN(s.wer) && isFinite(s.wer)) {
-        totalSessionsWer += s.wer;
-        werSessionCount++;
-      }
-    });
-
-    const globalWer = werSessionCount > 0 ? +(totalSessionsWer / werSessionCount).toFixed(1) : 14.3;
+    const globalWer = referenceWordCount > 0 ? +(rawWordEdits / referenceWordCount * 100).toFixed(1) : Number.NaN;
     const globalWordAccuracy = +(Math.max(0, 100 - globalWer)).toFixed(1);
 
     const werTrend: WerTrendItem[] = validSessions.map((s, idx) => {
@@ -3081,45 +3143,15 @@ export class HandAiAnalyticsStore {
 
     // D. Systematic Error Analysis Aggregated Across Real Trials
     const calculatedTotalErrors = toneCount + similarCount + missingCount + qualityCount + extraCount + wordSubCount + segFailCount;
-    const totalErrors = calculatedTotalErrors > 0 ? calculatedTotalErrors : (validSessions.reduce((acc, s) => acc + (s.totalErrors || 0), 0));
-
-    const isOnlyDefaultBenchmark = validSessions.length > 0 && validSessions.every((s) => s.sessionId.startsWith('session_benchmark_'));
-
-    const tonePct = isOnlyDefaultBenchmark
-      ? 35
-      : totalErrors > 0
-      ? Math.round((toneCount / totalErrors) * 100)
-      : 0;
-    const similarPct = isOnlyDefaultBenchmark
-      ? 25
-      : totalErrors > 0
-      ? Math.round((similarCount / totalErrors) * 100)
-      : 0;
-    const missingPct = isOnlyDefaultBenchmark
-      ? 20
-      : totalErrors > 0
-      ? Math.round((missingCount / totalErrors) * 100)
-      : 0;
-    const extraPct = isOnlyDefaultBenchmark
-      ? 0
-      : totalErrors > 0
-      ? Math.round((extraCount / totalErrors) * 100)
-      : 0;
-    const wordSubPct = isOnlyDefaultBenchmark
-      ? 0
-      : totalErrors > 0
-      ? Math.round((wordSubCount / totalErrors) * 100)
-      : 0;
-    const segFailPct = isOnlyDefaultBenchmark
-      ? 0
-      : totalErrors > 0
-      ? Math.round((segFailCount / totalErrors) * 100)
-      : 0;
-    const qualityPct = isOnlyDefaultBenchmark
-      ? 20
-      : totalErrors > 0
-      ? Math.max(0, 100 - tonePct - similarPct - missingPct - extraPct - wordSubPct - segFailPct)
-      : 0;
+    const totalErrors = calculatedTotalErrors;
+    const errorPercent = (count: number) => totalErrors > 0 ? Math.round(count / totalErrors * 100) : 0;
+    const tonePct = errorPercent(toneCount);
+    const similarPct = errorPercent(similarCount);
+    const missingPct = errorPercent(missingCount);
+    const extraPct = errorPercent(extraCount);
+    const wordSubPct = errorPercent(wordSubCount);
+    const segFailPct = errorPercent(segFailCount);
+    const qualityPct = errorPercent(qualityCount);
 
     const realConfusionPairs: ConfusionPairStat[] = Array.from(pairFreqMap.values())
       .sort((a, b) => b.count - a.count)
@@ -3130,19 +3162,13 @@ export class HandAiAnalyticsStore {
         label: `${p.wrongCharacter} → ${p.correctCharacter}`,
       }));
 
-    const topPairs = isOnlyDefaultBenchmark
-      ? DEFAULT_CONFUSION_PAIRS
-      : realConfusionPairs.length > 0
-      ? realConfusionPairs
-      : totalErrors > 0
-      ? DEFAULT_CONFUSION_PAIRS
-      : [];
+    const topPairs = realConfusionPairs;
     const topPair = topPairs.length > 0 ? topPairs[0] : null;
     const mostFrequentConfusion = topPair ? `${topPair.label} (${topPair.count} cases)` : 'None';
 
     const errorAnalysis: GlobalRealErrorAnalysis = {
       totalErrors,
-      errorRate: +((totalErrors / Math.max(1, totalLines)) * 100).toFixed(1),
+      errorRate: measuredLines.length > 0 ? +((totalErrors / measuredLines.length) * 100).toFixed(1) : Number.NaN,
       vietnameseToneErrors: toneCount,
       similarCharacterConfusion: similarCount,
       missingCharacterErrors: missingCount,
@@ -3203,9 +3229,9 @@ export class HandAiAnalyticsStore {
     };
 
     validSessions.forEach((s) => {
-      const versionKey = s.modelVersion.includes('v1.0')
+      const versionKey = (s.modelVersion || '').includes('v1.0')
         ? 'CRNN-v1.0'
-        : s.modelVersion.includes('v1.1')
+        : (s.modelVersion || '').includes('v1.1')
         ? 'CRNN-v1.1'
         : 'CRNN-v1.2';
 
@@ -3264,16 +3290,17 @@ export class HandAiAnalyticsStore {
     validSessions.forEach((s) => {
       if (s.lineMetrics && s.lineMetrics.length > 0) {
         s.lineMetrics.forEach((lm) => {
-          if (lm.evaluationStatus === 'SKIPPED') return;
+          if (!hasExplicitReference(lm) || lm.confidenceSource !== 'CRNN_CTC_SOFTMAX'
+            || !Number.isFinite(lm.confidence) || lm.confidence < 0 || lm.confidence > 100) return;
           calibTotalLines++;
-          const c = lm.confidence ?? 85;
+          const c = lm.confidence;
           let k = '<60%';
           if (c >= 90) k = '90-100%';
           else if (c >= 80) k = '80-89%';
           else if (c >= 70) k = '70-79%';
           else if (c >= 60) k = '60-69%';
           globalCalibBins[k].total++;
-          if (lm.isCorrect) globalCalibBins[k].correct++;
+          if (rawText(lm) === referenceText(lm)) globalCalibBins[k].correct++;
         });
       }
     });
@@ -3295,20 +3322,20 @@ export class HandAiAnalyticsStore {
             correctLines: data.correct,
           };
         })
-      : DEFAULT_CONFIDENCE_CALIBRATION;
+      : [];
 
     // TASK 4: Aggregated Error Root Cause Analysis
     let rcRecognition = 0;
     let rcLanguage = 0;
-    let rcSegmentation = segFailCount;
-    let rcQuality = qualityCount;
+    let rcSegmentation = 0;
+    let rcQuality = 0;
 
     validSessions.forEach((s) => {
       if (s.lineMetrics && s.lineMetrics.length > 0) {
         s.lineMetrics.forEach((lm) => {
-          if (lm.evaluationStatus === 'SKIPPED') return;
-          if (!lm.isCorrect || (lm.errorAnalysis && lm.errorAnalysis.errorType !== 'NO_ERROR')) {
-            const et = lm.errorAnalysis ? lm.errorAnalysis.errorType : 'SIMILAR_CHARACTER_CONFUSION';
+          if (!hasExplicitReference(lm)) return;
+          if (lm.errorAnalysis && lm.errorAnalysis.errorType !== 'NO_ERROR') {
+            const et = lm.errorAnalysis.errorType;
             const rc = classifyRootCause(et, lm.decisionSource, lm.isCorrect, lm.confidence, lm.status);
             if (rc === 'RECOGNITION_ERROR') rcRecognition++;
             else if (rc === 'LANGUAGE_CORRECTION_ERROR') rcLanguage++;
@@ -3321,28 +3348,36 @@ export class HandAiAnalyticsStore {
 
     const totalClassified = rcRecognition + rcLanguage + rcSegmentation + rcQuality;
     const rootCauseAnalysis: ErrorRootCauseSummary = {
-      recognitionErrors: rcRecognition > 0 ? rcRecognition : Math.round(totalErrors * 0.45),
-      languageCorrectionErrors: rcLanguage > 0 ? rcLanguage : Math.round(totalErrors * 0.15),
-      segmentationErrors: rcSegmentation > 0 ? rcSegmentation : Math.round(totalErrors * 0.20),
-      imageQualityErrors: rcQuality > 0 ? rcQuality : Math.round(totalErrors * 0.20),
-      totalClassified: totalClassified > 0 ? totalClassified : totalErrors,
+      recognitionErrors: rcRecognition,
+      languageCorrectionErrors: rcLanguage,
+      segmentationErrors: rcSegmentation,
+      imageQualityErrors: rcQuality,
+      totalClassified,
     };
 
     // TASK 1: Aggregated AI Impact Analysis
-    const totalOcrErrors = Math.max(0, totalLines - totalRawCorrect);
-    const correctedErrors = aiCorrection;
+    const aiComparedLines = measuredLines.filter((line) => line.aiReviewRecorded === true && typeof line.afterAiText === 'string');
+    const aiReferenceCharacters = aiComparedLines.reduce((sum, line) => sum + referenceText(line).length, 0);
+    const aiReferenceWords = aiComparedLines.reduce((sum, line) => sum + tokenizeWords(referenceText(line)).length, 0);
+    const aiRawCorrect = aiComparedLines.filter((line) => rawText(line) === referenceText(line)).length;
+    const aiFinalCorrect = aiComparedLines.filter((line) => normalizeEvaluationText(line.afterAiText!) === referenceText(line)).length;
+    const totalOcrErrors = aiComparedLines.length - aiRawCorrect;
+    const correctedErrors = aiComparedLines.filter((line) => rawText(line) !== referenceText(line)
+      && normalizeEvaluationText(line.afterAiText!) === referenceText(line)).length;
     const rescueRate = totalOcrErrors > 0
       ? Math.round((correctedErrors / totalOcrErrors) * 100)
-      : totalLines > 0 ? 100 : 0;
-    const accuracyGain = Math.max(0, finalAccuracy - rawAccuracy);
+      : Number.NaN;
+    const aiRawAccuracy = aiComparedLines.length > 0 ? +(aiRawCorrect / aiComparedLines.length * 100).toFixed(1) : Number.NaN;
+    const aiFinalAccuracy = aiComparedLines.length > 0 ? +(aiFinalCorrect / aiComparedLines.length * 100).toFixed(1) : Number.NaN;
+    const accuracyGain = aiFinalAccuracy - aiRawAccuracy;
 
     const globalAiImpact: GlobalAIImpactSummary = {
-      rawAccuracy,
-      rawCer: globalCer,
-      rawWer: globalWer,
-      finalAccuracy,
-      finalCer: +(Math.max(0, globalCer - (aiCorrection > 0 ? 1.8 : 0))).toFixed(1),
-      finalWer: +(Math.max(0, globalWer - (aiCorrection > 0 ? 3.5 : 0))).toFixed(1),
+      rawAccuracy: aiRawAccuracy,
+      rawCer: aiReferenceCharacters > 0 ? +(aiComparedLines.reduce((sum, line) => sum + computeLevenshteinDistance(rawText(line), referenceText(line)), 0) / aiReferenceCharacters * 100).toFixed(1) : Number.NaN,
+      rawWer: aiReferenceWords > 0 ? +(aiComparedLines.reduce((sum, line) => sum + calculateWer(rawText(line), referenceText(line)).wordDistance, 0) / aiReferenceWords * 100).toFixed(1) : Number.NaN,
+      finalAccuracy: aiFinalAccuracy,
+      finalCer: aiReferenceCharacters > 0 ? +(aiComparedLines.reduce((sum, line) => sum + computeLevenshteinDistance(normalizeEvaluationText(line.afterAiText!), referenceText(line)), 0) / aiReferenceCharacters * 100).toFixed(1) : Number.NaN,
+      finalWer: aiReferenceWords > 0 ? +(aiComparedLines.reduce((sum, line) => sum + calculateWer(normalizeEvaluationText(line.afterAiText!), referenceText(line)).wordDistance, 0) / aiReferenceWords * 100).toFixed(1) : Number.NaN,
       accuracyGain,
       totalOcrErrors,
       correctedErrors,
@@ -3400,7 +3435,7 @@ export class HandAiAnalyticsStore {
       datasetQuality: this.getDatasetQualityCard(),
       activeDataset: activeDs,
       datasetVersions: this.getDatasetVersions(),
-      confidenceReliability: DEFAULT_RELIABILITY,
+      confidenceReliability: confidenceCalibration,
       confidenceCalibration,
       aiImpact: globalAiImpact,
       datasetDistribution: DEFAULT_DATASET_DISTRIBUTION,
@@ -3551,19 +3586,180 @@ export class HandAiAnalyticsStore {
   }
 
   async reset(): Promise<void> {
+    await this.clearAllSessions();
     this.sessions = [...DEFAULT_SESSIONS];
     this.currentTrialAnalytics = null;
-    try {
-      await removeStorageItem(STORAGE_KEY);
-    } catch {}
+    await removeStorageItem(STORAGE_KEY);
+    this.notify();
   }
 
   async clearAllSessions(): Promise<void> {
+    await this.init();
+    await this.deleteSessions(this.sessions.map((session) => session.sessionId));
+    // Persist an empty archive even when there were no sessions to delete.
+    await setStorageItem(STORAGE_KEY, '[]');
     this.sessions = [];
     this.currentTrialAnalytics = null;
-    try {
-      await removeStorageItem(STORAGE_KEY);
-    } catch {}
+    this.notify();
+  }
+
+  async cleanupIncompleteSessions(): Promise<number> {
+    await this.init();
+    const checks = await Promise.all(this.sessions
+      .filter((session) => session.isSampleData !== true)
+      .map(async (session) => ({
+        sessionId: session.sessionId,
+        usable: hasStoredRecognition(session) && await hasUsableHistoryImage(session),
+      })));
+    const ids = checks.filter((item) => !item.usable).map((item) => item.sessionId);
+    await this.deleteSessions(ids);
+    return ids.length;
+  }
+
+  async deleteSessions(sessionIds: string[]): Promise<void> {
+    await this.init();
+    const ids = new Set(sessionIds);
+    const removed = this.sessions.filter((session) => ids.has(session.sessionId));
+    if (removed.length === 0) return;
+    const retained = this.sessions.filter((session) => !ids.has(session.sessionId));
+    await setStorageItem(STORAGE_KEY, JSON.stringify(retained));
+    this.sessions = retained;
+    if (this.currentTrialAnalytics && ids.has(this.currentTrialAnalytics.trialId)) {
+      this.currentTrialAnalytics = null;
+    }
+    OcrPilotService.removeCachedTrials(sessionIds);
+    this.notify();
+    const remainingImages = new Set(retained.map(sessionImageUri));
+    const cleanup = await Promise.allSettled(removed.map(async (session) => {
+      await removeStorageItem(`trial_analytics_${session.sessionId}`);
+      const image = sessionImageUri(session);
+      if (Platform.OS !== 'web' && historyDirectory() && image.startsWith(historyDirectory()!)
+        && !remainingImages.has(image)) {
+        await FileSystem.deleteAsync(image, { idempotent: true });
+      }
+    }));
+    cleanup.forEach((result) => {
+      if (result.status === 'rejected') console.warn('[HandAiAnalytics] Failed to remove archived detail:', result.reason);
+    });
+  }
+
+  async setReferenceText(sessionId: string, lineId: string, text: string): Promise<void> {
+    await this.init();
+    const session = this.sessions.find((item) => item.sessionId === sessionId);
+    if (!session || session.isSampleData === true) throw new Error('Recognition session is unavailable');
+    if (!session.lineMetrics?.some((line) => line.lineId === lineId)) throw new Error('Recognition line is unavailable');
+    const groundTruth = text.normalize('NFC').trim();
+    const normalize = (value: string) => value.normalize('NFC').trim().replace(/\s+/g, ' ');
+    const lineMetrics = session.lineMetrics.map((line) => {
+      if (line.lineId !== lineId) return line;
+      const raw = line.ocrOutput || line.modelOutput || line.ocrText || '';
+      const final = line.finalResult || line.finalText || line.text || '';
+      const isRawCorrect = Boolean(groundTruth) && normalize(raw) === normalize(groundTruth);
+      const isFinalCorrect = Boolean(groundTruth) && normalize(final) === normalize(groundTruth);
+      const cer = groundTruth ? calculateCer(normalize(raw), normalize(groundTruth)).cerPercent : 0;
+      const wer = groundTruth ? calculateWer(normalize(raw), normalize(groundTruth)).werPercent : 0;
+      return {
+        ...line,
+        groundTruth,
+        groundTruthStatus: groundTruth ? 'EXPLICIT' as const : 'MISSING' as const,
+        referenceSource: groundTruth ? 'EXPLICIT_REFERENCE' as const : undefined,
+        evaluationStatus: groundTruth ? 'EVALUATED' as const : 'PENDING' as const,
+        isRawCorrect,
+        isFinalCorrect,
+        isCorrect: isFinalCorrect,
+        cer,
+        characterAccuracy: Math.max(0, 100 - cer),
+        wer,
+        wordAccuracy: Math.max(0, 100 - wer),
+        referenceWords: tokenizeWords(groundTruth),
+        predictedWords: tokenizeWords(raw),
+        errorAnalysis: groundTruth ? classifyLineError(raw, groundTruth, line.confidence, line.status, isRawCorrect) : undefined,
+      };
+    });
+    const updated = { ...session, lineMetrics };
+    const next = this.sessions.map((item) => item.sessionId === sessionId ? updated : item);
+    await setStorageItem(STORAGE_KEY, JSON.stringify(next));
+    this.sessions = next;
+    if (this.currentTrialAnalytics?.trialId === sessionId) this.currentTrialAnalytics = null;
+    await removeStorageItem(`trial_analytics_${sessionId}`);
+    this.notify();
+  }
+
+  async reviewFinalText(sessionId: string, lineId: string, text: string): Promise<void> {
+    await this.init();
+    const session = this.sessions.find((item) => item.sessionId === sessionId);
+    if (!session || session.isSampleData === true) throw new Error('Recognition session is unavailable');
+    const selected = text.normalize('NFC').trim();
+    if (!selected) throw new Error('Final text cannot be empty');
+    const line = session.lineMetrics?.find((item) => item.lineId === lineId);
+    if (!line) throw new Error('Recognition line is unavailable');
+    const previousFinal = (line.finalResult || line.finalText || line.text || '').normalize('NFC').trim();
+    const changed = previousFinal !== selected;
+    const lineMetrics = session.lineMetrics!.map((item) => item.lineId === lineId ? {
+      ...item,
+      finalText: selected,
+      finalResult: selected,
+      text: selected,
+      decisionSource: changed ? 'MANUAL_EDIT' as const : item.decisionSource,
+      sourceDecision: changed ? 'MANUAL_EDIT' as const : item.sourceDecision,
+      source: changed ? 'MANUAL' as const : item.source,
+      correctionOrigin: changed ? 'HUMAN' as const : item.correctionOrigin,
+      correctionType: changed ? 'MANUAL_CORRECTED' as const : item.correctionType,
+      status: changed ? 'Manual' as const : item.status,
+    } : item);
+    await this.persistReviewedLines(sessionId, lineMetrics, new Set([lineId]));
+  }
+
+  async confirmAllFinalTexts(sessionId: string): Promise<number> {
+    await this.init();
+    const session = this.sessions.find((item) => item.sessionId === sessionId);
+    if (!session || session.isSampleData === true) throw new Error('Recognition session is unavailable');
+    const pendingIds = new Set((session.lineMetrics || [])
+      .filter((line) => !hasExplicitReference(line) && Boolean((line.finalResult || line.finalText || line.text || '').trim()))
+      .map((line) => line.lineId));
+    if (!pendingIds.size) return 0;
+    await this.persistReviewedLines(sessionId, session.lineMetrics || [], pendingIds);
+    return pendingIds.size;
+  }
+
+  private async persistReviewedLines(sessionId: string, sourceLines: LineMetric[], reviewedIds: Set<string>): Promise<void> {
+    const session = this.sessions.find((item) => item.sessionId === sessionId)!;
+    const normalize = (value: string) => value.normalize('NFC').trim().replace(/\s+/g, ' ');
+    const lineMetrics = sourceLines.map((line) => {
+      if (!reviewedIds.has(line.lineId)) return line;
+      const final = (line.finalResult || line.finalText || line.text || '').normalize('NFC').trim();
+      if (!final) return line;
+      const raw = line.ocrOutput || line.modelOutput || line.ocrText || '';
+      const normalizedRaw = normalize(raw);
+      const normalizedFinal = normalize(final);
+      const isRawCorrect = normalizedRaw === normalizedFinal;
+      const cer = calculateCer(normalizedRaw, normalizedFinal).cerPercent;
+      const wer = calculateWer(normalizedRaw, normalizedFinal).werPercent;
+      return {
+        ...line,
+        groundTruth: final,
+        groundTruthStatus: 'EXPLICIT' as const,
+        referenceSource: 'EXPLICIT_REFERENCE' as const,
+        evaluationStatus: 'EVALUATED' as const,
+        isRawCorrect,
+        isFinalCorrect: true,
+        isCorrect: true,
+        cer,
+        characterAccuracy: Math.max(0, 100 - cer),
+        wer,
+        wordAccuracy: Math.max(0, 100 - wer),
+        referenceWords: tokenizeWords(final),
+        predictedWords: tokenizeWords(raw),
+        errorAnalysis: classifyLineError(raw, final, line.confidence, line.status, isRawCorrect),
+      };
+    });
+    const updated = { ...session, lineMetrics };
+    const next = this.sessions.map((item) => item.sessionId === sessionId ? updated : item);
+    await setStorageItem(STORAGE_KEY, JSON.stringify(next));
+    this.sessions = next;
+    if (this.currentTrialAnalytics?.trialId === sessionId) this.currentTrialAnalytics = null;
+    await removeStorageItem(`trial_analytics_${sessionId}`);
+    this.notify();
   }
 
   getDatasetVersions(): DatasetVersion[] {
@@ -3986,7 +4182,7 @@ export function exportResearchEvaluationReport(
   const rawAcc = trialAnalytics ? trialAnalytics.rawAccuracy : (globalAnalytics.aiImpact?.rawAccuracy ?? globalAnalytics.rawAccuracy);
   const finalAcc = trialAnalytics ? trialAnalytics.finalAccuracy : (globalAnalytics.aiImpact?.finalAccuracy ?? globalAnalytics.finalAccuracy);
   const gain = trialAnalytics ? trialAnalytics.aiGain : (globalAnalytics.aiImpact?.accuracyGain ?? Math.max(0, finalAcc - rawAcc));
-  const rescueRate = trialAnalytics ? trialAnalytics.aiImpact?.rescueRate ?? 65 : (globalAnalytics.aiImpact?.rescueRate ?? 67);
+  const rescueRate = trialAnalytics ? trialAnalytics.aiImpact?.rescueRate ?? Number.NaN : (globalAnalytics.aiImpact?.rescueRate ?? Number.NaN);
   const cer = trialAnalytics ? trialAnalytics.cer : globalAnalytics.globalCer;
   const wer = trialAnalytics ? trialAnalytics.wer : globalAnalytics.globalWer;
   const charAcc = trialAnalytics ? trialAnalytics.characterAccuracy : globalAnalytics.globalCharacterAccuracy;
@@ -3995,6 +4191,8 @@ export function exportResearchEvaluationReport(
 
   const calibList = trialAnalytics ? trialAnalytics.confidenceCalibration : globalAnalytics.confidenceCalibration;
   const rootCauses = trialAnalytics ? trialAnalytics.rootCauseSummary : globalAnalytics.rootCauseAnalysis;
+  const metricPercent = (value: number | null | undefined) => typeof value === 'number' && Number.isFinite(value)
+    ? `${value}%` : 'Unavailable';
 
   return `# HandAI Research Evaluation Report
 
@@ -4003,8 +4201,8 @@ export function exportResearchEvaluationReport(
 - **Evaluation Domain**: Vietnamese Handwritten Text Recognition (HTR) for Grade 1–5 Students
 - **Evaluation Standard**: Ministry of Education & Training (MOET) Primary Penmanship Standard
 - **Generated Date**: ${dateStr}
-- **Evaluation Status**: Academic Defense Verification Ready
-- **Total Validated Samples**: ${globalAnalytics.datasetQuality?.totalSamples || 59747}
+- **Evaluation Status**: Descriptive results from recorded sessions; independent validation is required.
+- **Recorded Images**: ${globalAnalytics.totalImages}
 
 ---
 
@@ -4050,46 +4248,46 @@ export function exportResearchEvaluationReport(
   - CRNN-v1.0 (HandAI-v1.0): 82.0% Accuracy, 12.0% CER, 20.0% WER (Baseline)
   - CRNN-v1.1 (HandAI-v1.1): 88.0% Accuracy, 8.0% CER, 15.0% WER (Intermediate)
   - CRNN-v1.2 (HandAI-v1.2): 94.0% Accuracy, 5.0% CER, 8.0% WER (Active Production Candidate)
-- **Average Inference Latency**: ${globalAnalytics.averageLatency || 2.3}s / page
+- **Average Recorded Latency**: ${Number.isFinite(globalAnalytics.averageLatency) ? `${globalAnalytics.averageLatency}s / page` : 'Unavailable'}
 
 ---
 
 ## 5. Recognition Metrics
-- **CRNN Raw Accuracy**: ${rawAcc}%
-- **AI Assisted Final Accuracy**: ${finalAcc}%
-- **Character Error Rate (CER)**: ${cer}%
-- **Word Error Rate (WER)**: ${wer}%
-- **Character Accuracy**: ${charAcc}%
-- **Word Accuracy**: ${wordAcc}%
+- **CRNN Raw Accuracy**: ${metricPercent(rawAcc)}
+- **AI Assisted Final Accuracy**: ${metricPercent(finalAcc)}
+- **Character Error Rate (CER)**: ${metricPercent(cer)}
+- **Word Error Rate (WER)**: ${metricPercent(wer)}
+- **Character Accuracy**: ${metricPercent(charAcc)}
+- **Word Accuracy**: ${metricPercent(wordAcc)}
 
 ---
 
 ## 6. AI Impact Analysis
-- **Accuracy Gain (Final - Raw)**: +${gain}%
-- **OCR Error Rescue Rate**: ${rescueRate}%
+- **Accuracy Gain (Final - Raw)**: ${Number.isFinite(gain) && gain > 0 ? '+' : ''}${metricPercent(gain)}
+- **OCR Error Rescue Rate**: ${metricPercent(rescueRate)}
 - **Error Recovery Contribution**:
   - Baseline OCR Errors: ${trialAnalytics ? (trialAnalytics.aiImpact.totalOcrErrors || 0) : (globalAnalytics.aiImpact.totalOcrErrors || 0)}
   - Corrected by AI: ${trialAnalytics ? trialAnalytics.aiImpact.correctedErrors : globalAnalytics.aiImpact.correctedErrors}
-  - Post-AI Final Accuracy: ${finalAcc}% (vs ${rawAcc}% Raw CRNN)
+  - Post-AI Final Accuracy: ${metricPercent(finalAcc)} (vs ${metricPercent(rawAcc)} Raw CRNN)
 
 ---
 
 ## 7. Confidence Calibration
 | Confidence Range | Samples | Correct Samples | Empirical Accuracy | Calibration State |
 |---|---|---|---|---|
-${(calibList || []).map((b) => `| ${b.range} | ${b.samples ?? b.totalCount} | ${b.correctSamples ?? b.correctCount} | ${b.accuracy}% | ${b.accuracy >= 90 ? 'High Precision' : b.accuracy >= 75 ? 'Well Calibrated' : 'Review Required'} |`).join('\n')}
+${(calibList || []).map((b) => `| ${b.range} | ${b.samples ?? b.totalCount} | ${b.correctSamples ?? b.correctCount} | ${b.samples > 0 ? `${b.accuracy}%` : 'Unavailable'} | ${b.samples > 0 ? 'Observed OCR matches' : 'No referenced samples'} |`).join('\n')}
 
-- **Reliability Assessment**: Prediction confidence monotonically correlates with empirical correctness across all ranges. High confidence (≥90%) yields ≥95% accuracy.
+- **Reliability Assessment**: These bins describe observed original OCR matches against separate reference text. Scores remain uncalibrated; this report does not establish a probability that an entire line is correct.
 
 ---
 
 ## 8. Error Analysis & Root Cause Classification
 - **Total Systematic Errors**: ${globalAnalytics.errorAnalysis?.totalErrors || 0}
 - **Systematic Distribution**:
-  - Vietnamese Tone Error: ${globalAnalytics.errorAnalysis?.distribution?.vietnameseTone?.percentage || 35}%
-  - Similar Character Confusion: ${globalAnalytics.errorAnalysis?.distribution?.similarCharacter?.percentage || 25}%
-  - Missing Character: ${globalAnalytics.errorAnalysis?.distribution?.missingCharacter?.percentage || 20}%
-  - Low Image Quality: ${globalAnalytics.errorAnalysis?.distribution?.lowImageQuality?.percentage || 20}%
+  - Vietnamese Tone Error: ${globalAnalytics.errorAnalysis?.distribution?.vietnameseTone?.percentage ?? 0}%
+  - Similar Character Confusion: ${globalAnalytics.errorAnalysis?.distribution?.similarCharacter?.percentage ?? 0}%
+  - Missing Character: ${globalAnalytics.errorAnalysis?.distribution?.missingCharacter?.percentage ?? 0}%
+  - Low Image Quality: ${globalAnalytics.errorAnalysis?.distribution?.lowImageQuality?.percentage ?? 0}%
 - **Root Cause Breakdown**:
   1. Recognition Error (CRNN prediction failure): ${rootCauses?.recognitionErrors ?? 0} cases
   2. Language Correction Error (AI correction incorrect): ${rootCauses?.languageCorrectionErrors ?? 0} cases
@@ -4099,9 +4297,9 @@ ${(calibList || []).map((b) => `| ${b.range} | ${b.samples ?? b.totalCount} | ${
 ---
 
 ## 9. Conclusion
-- The HandAI system meets and exceeds research evaluation criteria for Vietnamese primary school handwriting recognition.
-- The CRNN baseline delivers robust acoustic/visual character extraction (${rawAcc}%), while the contextual AI layer provides an additional +${gain}% accuracy boost, rescuing ${rescueRate}% of baseline recognition errors.
-- Both confidence calibration and root cause distributions confirm system safety, transparent error traceability, and full academic readiness.
+- Recognition metrics describe only lines with separately provided reference text.
+- Manual selections must be reported independently from AI assistance. Missing measurements do not establish accuracy or improvement.
+- Confidence scores and error classifications alone do not establish system safety, calibration, or academic readiness.
 `;
 }
 

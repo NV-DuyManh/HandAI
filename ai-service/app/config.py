@@ -4,7 +4,16 @@ from pydantic import Field, AliasChoices
 from typing import Optional
 
 _SERVICE_DIR = Path(__file__).resolve().parent.parent
-_ENV_FILES = [str(_SERVICE_DIR / ".env.local"), str(_SERVICE_DIR / ".env"), ".env.local", ".env"]
+
+
+def _ordered_env_files(service_dir: Path, working_dir: Path) -> list[str]:
+    # Pydantic gives later files priority: local keys must override blank base defaults.
+    paths = [directory / name for name in (".env", ".env.local")
+             for directory in (service_dir, working_dir)]
+    return list(dict.fromkeys(str(path.resolve()) for path in paths))
+
+
+_ENV_FILES = _ordered_env_files(_SERVICE_DIR, Path.cwd())
 
 class Settings(BaseSettings):
     app_env: str = "development"

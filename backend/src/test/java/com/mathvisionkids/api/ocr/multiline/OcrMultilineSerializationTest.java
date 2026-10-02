@@ -13,6 +13,48 @@ public class OcrMultilineSerializationTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Test
+    void localSubstitutionCannotMasqueradeAsCloudAdviceButStoredSelectionRemains() {
+        OcrMultilineLine entity = new OcrMultilineLine();
+        entity.setRawOcrText("CCm yêu mùa hề");
+        entity.setPredictedText("Em yêu mùa hè");
+        entity.setCorrectionDecision("LOCAL_ADVISOR_APPLY");
+        entity.setGroqStatus("SUCCESS");
+        entity.setGroqSuggestion("Em yêu mùa hè");
+        entity.setGroqConfidence(0.99);
+        entity.setGroqConfidenceSource("AI_SELF_REPORTED");
+        entity.setGeminiStatus("SUCCESS");
+        entity.setGeminiSuggestion("Em yêu mùa hè");
+        MultilineLineResponse response = MultilineLineResponse.fromEntity(entity);
+        assertEquals("CCm yêu mùa hề", response.getRawOcrText());
+        assertEquals("Em yêu mùa hè", response.getFinalText());
+        assertEquals("LOCAL_ADVISOR_APPLY", entity.getCorrectionDecision());
+        assertEquals("SUCCESS", entity.getGroqStatus()); // DTO must not mutate saved history.
+        assertEquals("UNAVAILABLE", response.getGroqStatus());
+        assertEquals("UNAVAILABLE", response.getGeminiStatus());
+        assertNull(response.getGroqSuggestion());
+        assertNull(response.getGroqConfidence());
+        assertNull(response.getGroqConfidenceSource());
+        assertNull(response.getGeminiSuggestion());
+    }
+
+    @Test
+    void structuredOutageOverridesContradictorySuccessWithoutHidingRealOtherProvider() {
+        OcrMultilineLine entity = new OcrMultilineLine();
+        entity.setGroqStatus("SUCCESS");
+        entity.setGroqSuggestion("invented correction");
+        entity.setGeminiStatus("SUCCESS");
+        entity.setGeminiSuggestion("actual correction");
+        entity.setSuggestionsJson("[{\"provider\":\"GROQ\",\"status\":\"UNAVAILABLE\",\"text\":\"\"},{\"provider\":\"GEMINI\",\"status\":\"SUCCESS\",\"text\":\"actual correction\"}]");
+        MultilineLineResponse response = MultilineLineResponse.fromEntity(entity);
+        assertEquals("UNAVAILABLE", response.getGroqStatus());
+        assertNull(response.getGroqSuggestion());
+        assertEquals("SUCCESS", response.getGeminiStatus());
+        assertEquals("actual correction", response.getGeminiSuggestion());
+        assertEquals(1, response.getSuggestions().size());
+        assertEquals("GEMINI", response.getSuggestions().get(0).get("provider"));
+    }
+
+    @Test
     void testDualAdvisorSerialization_AllFieldsPreserved() throws Exception {
         LineBoxDto line = new LineBoxDto();
         line.setLineId("line-01");
@@ -24,6 +66,7 @@ public class OcrMultilineSerializationTest {
 
         line.setRawOcrText("em yeu mua he");
         line.setRawOcrConfidence(0.72);
+        line.setRawOcrConfidenceSource("CRNN_CTC_SOFTMAX");
         line.setCorrectedText("Em yêu mùa hè");
         line.setCorrectionConfidence(0.92);
         line.setCorrectionApplied(true);
@@ -33,11 +76,13 @@ public class OcrMultilineSerializationTest {
 
         line.setGroqSuggestion("Em yêu mùa hè");
         line.setGroqConfidence(0.90);
+        line.setGroqConfidenceSource("AI_SELF_REPORTED");
         line.setGroqDecision("SUGGEST_ONLY");
         line.setGroqStatus("SUCCESS");
 
         line.setGeminiSuggestion("Em yêu mùa hè");
         line.setGeminiConfidence(0.95);
+        line.setGeminiConfidenceSource("AI_SELF_REPORTED");
         line.setGeminiDecision("SUGGEST_ONLY");
         line.setGeminiStatus("SUCCESS");
 
@@ -62,6 +107,9 @@ public class OcrMultilineSerializationTest {
         LineBoxDto deserialized = objectMapper.readValue(json, LineBoxDto.class);
         assertEquals("em yeu mua he", deserialized.getRawOcrText());
         assertEquals(0.72, deserialized.getRawOcrConfidence());
+        assertEquals("CRNN_CTC_SOFTMAX", deserialized.getRawOcrConfidenceSource());
+        assertEquals("AI_SELF_REPORTED", deserialized.getGroqConfidenceSource());
+        assertEquals("AI_SELF_REPORTED", deserialized.getGeminiConfidenceSource());
         assertEquals("Em yêu mùa hè", deserialized.getGroqSuggestion());
         assertEquals("Em yêu mùa hè", deserialized.getGeminiSuggestion());
         assertEquals("Em yêu mùa hè", deserialized.getFinalText());

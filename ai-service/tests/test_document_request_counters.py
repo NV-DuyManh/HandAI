@@ -6,7 +6,8 @@ regardless of whether N=1, 5, or 12 lines, runs in parallel, and has zero per-li
 import asyncio
 import time
 import pytest
-from unittest.mock import patch, AsyncMock
+import numpy as np
+from unittest.mock import patch, AsyncMock, Mock
 from app.integrations.groq.document_corrector import (
     request_groq_document_correction,
     reset_groq_http_counter,
@@ -70,7 +71,7 @@ async def test_document_request_counters():
             # Setup pool mocks
             m_gkey = AsyncMock()
             mock_groq_pool.return_value.acquire.return_value = m_gkey
-            mock_groq_pool.return_value.report_success = AsyncMock()
+            mock_groq_pool.return_value.report_success = Mock()
             
             m_gemkey = AsyncMock()
             m_gemkey.safe_id = "test-gem-key"
@@ -85,16 +86,17 @@ async def test_document_request_counters():
             
             t0 = time.perf_counter()
             # Run in parallel
-            groq_task = asyncio.create_task(request_groq_document_correction(lines))
-            gemini_task = asyncio.create_task(request_gemini_document_correction(lines))
+            image = np.full((800, 800, 3), 255, dtype=np.uint8)
+            groq_task = asyncio.create_task(request_groq_document_correction(lines, image))
+            gemini_task = asyncio.create_task(request_gemini_document_correction(lines, image))
             groq_res, gem_res = await asyncio.gather(groq_task, gemini_task)
             elapsed = time.perf_counter() - t0
             
             groq_calls = get_groq_http_counter()
             gemini_calls = get_gemini_http_counter()
             
-            assert groq_calls <= 1, f"Groq calls exceeded 1 for N={n}: {groq_calls}"
-            assert gemini_calls <= 1, f"Gemini calls exceeded 1 for N={n}: {gemini_calls}"
+            assert groq_calls == 1, f"Groq should make one mocked request for N={n}: {groq_calls}"
+            assert gemini_calls == 1, f"Gemini should make one mocked request for N={n}: {gemini_calls}"
             assert len(groq_res) == n
             assert len(gem_res) == n
             

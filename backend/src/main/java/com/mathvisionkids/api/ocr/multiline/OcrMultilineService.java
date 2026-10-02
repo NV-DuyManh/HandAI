@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mathvisionkids.api.common.ApiException;
 import com.mathvisionkids.api.storage.ObjectStorageService;
 import com.mathvisionkids.api.ocr.OcrStorageVerifier;
+import com.mathvisionkids.api.ocr.OcrConfidence;
 import com.mathvisionkids.api.user.User;
 import com.mathvisionkids.api.user.UserRepository;
 import org.slf4j.Logger;
@@ -127,6 +128,9 @@ public class OcrMultilineService {
             }
 
             MultilineDetectResponse result = response.getBody();
+            if (result.getLines() != null) {
+                result.getLines().forEach(LineBoxDto::sanitizeConfidence);
+            }
             int lineCount = result.getLines() != null ? result.getLines().size() : 0;
             log.info("[OCR_MULTILINE_RESPONSE] Status={}, lines={}, detectorVersion={}",
                     response.getStatusCode(), lineCount, result.getDetectorVersion());
@@ -243,6 +247,7 @@ public class OcrMultilineService {
 
             for (int i = 0; i < maxLines; i++) {
                 LineBoxDto box = confirmedLines.get(i);
+                box.sanitizeConfidence();
                 int x = Math.max(0, Math.min(box.getX(), pageWidth - 1));
                 int y = Math.max(0, Math.min(box.getY(), pageHeight - 1));
                 int w = Math.max(10, Math.min(box.getWidth(), pageWidth - x));
@@ -269,17 +274,21 @@ public class OcrMultilineService {
                 String checkpointSha = "";
                 String vocabSha = "";
                 String prepVersion = "v1_resize_64x1024_imagenet";
+                Double rawOcrConfidence = null;
+                String rawOcrConfidenceSource = null;
 
-                if (box.getText() != null && !box.getText().trim().isEmpty()) {
-                    // Bypass CRNN for canonical exact matches
-                    recognizedText = box.getText().trim();
-                    modelName = "CANONICAL_EXACT";
-                    modelVersion = "poem_block_matched";
-                } else if (box.getRawOcrText() != null && !box.getRawOcrText().trim().isEmpty()) {
+                if (box.getRawOcrText() != null && !box.getRawOcrText().trim().isEmpty()) {
                     // Reuse OCR already recognized during detection to prevent slice-induced corruptions
                     recognizedText = box.getRawOcrText().trim();
                     modelName = "Vietnamese-Handwriting-OCR-Full";
                     modelVersion = "1.0.0";
+                    rawOcrConfidence = box.getRawOcrConfidence();
+                    rawOcrConfidenceSource = box.getRawOcrConfidenceSource();
+                } else if (box.getText() != null && !box.getText().trim().isEmpty()) {
+                    // Text-only canonical matches have no measured CRNN score.
+                    recognizedText = box.getText().trim();
+                    modelName = "CANONICAL_EXACT";
+                    modelVersion = "poem_block_matched";
                 } else {
                     // Call internal CRNN endpoint
                     String targetUrl = aiServiceBaseUrl + "/internal/v1/ocr/recognize-line";
@@ -299,12 +308,17 @@ public class OcrMultilineService {
                     );
 
                     Map<String, Object> aiData = aiResponse.getBody();
+                    if (!aiResponse.getStatusCode().is2xxSuccessful() || aiData == null) {
+                        throw new ApiException("AI_SERVICE_ERROR", "Failed to recognize handwriting line", HttpStatus.BAD_GATEWAY);
+                    }
                     recognizedText = aiData != null ? String.valueOf(aiData.getOrDefault("recognized_text", "")) : "";
                     modelName = aiData != null ? String.valueOf(aiData.getOrDefault("model_name", "Vietnamese-Handwriting-OCR-Full")) : "Vietnamese-Handwriting-OCR-Full";
                     modelVersion = aiData != null ? String.valueOf(aiData.getOrDefault("model_version", "1.0.0")) : "1.0.0";
                     checkpointSha = aiData != null ? String.valueOf(aiData.getOrDefault("checkpoint_sha256", "")) : "";
                     vocabSha = aiData != null ? String.valueOf(aiData.getOrDefault("vocab_sha256", "")) : "";
                     prepVersion = aiData != null ? String.valueOf(aiData.getOrDefault("preprocessing_version", "v1_resize_64x1024_imagenet")) : "v1_resize_64x1024_imagenet";
+                    rawOcrConfidence = OcrConfidence.rawScore(aiData.get("confidence"), aiData.get("confidence_source"));
+                    rawOcrConfidenceSource = rawOcrConfidence != null ? OcrConfidence.CRNN_CTC_SOFTMAX : null;
                 }
 
                 // Preserve finalText if passed from detect-lines, otherwise fallback to recognizedText
@@ -330,11 +344,12 @@ public class OcrMultilineService {
                 lineEntity.setCheckpointSha256(checkpointSha);
                 lineEntity.setVocabSha256(vocabSha);
                 lineEntity.setPreprocessingVersion(prepVersion);
+                lineEntity.setRawOcrConfidence(rawOcrConfidence);
+                lineEntity.setRawOcrConfidenceSource(rawOcrConfidenceSource);
 
                 // Populate OCR-First audit fields from confirmed box if present
-                if (box.getRawOcrText() != null) {
+                if (box.getRawOcrText() != null && !box.getRawOcrText().trim().isEmpty()) {
                     lineEntity.setRawOcrText(box.getRawOcrText());
-                    lineEntity.setRawOcrConfidence(box.getRawOcrConfidence());
                     lineEntity.setCorrectedText(box.getCorrectedText());
                     lineEntity.setCorrectionConfidence(box.getCorrectionConfidence());
                     lineEntity.setCorrectionApplied(box.getCorrectionApplied());
@@ -345,12 +360,14 @@ public class OcrMultilineService {
 
                 lineEntity.setGroqSuggestion(box.getGroqSuggestion());
                 lineEntity.setGroqConfidence(box.getGroqConfidence());
+                lineEntity.setGroqConfidenceSource(box.getGroqConfidenceSource());
                 lineEntity.setGroqDecision(box.getGroqDecision());
                 lineEntity.setGroqStatus(box.getGroqStatus());
                 lineEntity.setGroqModel(box.getGroqModel());
 
                 lineEntity.setGeminiSuggestion(box.getGeminiSuggestion());
                 lineEntity.setGeminiConfidence(box.getGeminiConfidence());
+                lineEntity.setGeminiConfidenceSource(box.getGeminiConfidenceSource());
                 lineEntity.setGeminiDecision(box.getGeminiDecision());
                 lineEntity.setGeminiStatus(box.getGeminiStatus());
                 lineEntity.setGeminiModel(box.getGeminiModel());
@@ -519,6 +536,11 @@ public class OcrMultilineService {
             
             Map<String, Object> requestBody = new HashMap<>();
             requestBody.put("lines", requestLines);
+            byte[] pageBytes = objectStorageService.loadBytes(trial.getPageImageObjectKey());
+            if (pageBytes != null && pageBytes.length > 0
+                    && computeSha256(pageBytes).equals(trial.getPageImageSha256())) {
+                requestBody.put("imageBase64", Base64.getEncoder().encodeToString(pageBytes));
+            }
             
             String targetUrl = aiServiceBaseUrl + "/internal/v1/ocr/advise-lines";
             HttpHeaders headers = new HttpHeaders();
@@ -547,14 +569,30 @@ public class OcrMultilineService {
                         Map<String, Object> respLine = respLines.get(i);
                         
                         line.setGroqSuggestion((String) respLine.get("groqSuggestion"));
-                        line.setGroqConfidence(respLine.get("groqConfidence") != null ? Double.parseDouble(respLine.get("groqConfidence").toString()) : null);
+                        Double groqScore = OcrConfidence.advisorScore(respLine.get("groqConfidence"),
+                                respLine.get("groqStatus"), respLine.get("groqConfidenceSource"));
+                        line.setGroqConfidence(groqScore);
+                        line.setGroqConfidenceSource(groqScore != null ? OcrConfidence.AI_SELF_REPORTED : null);
                         line.setGroqDecision((String) respLine.get("groqDecision"));
                         line.setGroqStatus((String) respLine.get("groqStatus"));
+                        line.setGroqModel((String) respLine.get("groqModel"));
                         
                         line.setGeminiSuggestion((String) respLine.get("geminiSuggestion"));
-                        line.setGeminiConfidence(respLine.get("geminiConfidence") != null ? Double.parseDouble(respLine.get("geminiConfidence").toString()) : null);
+                        Double geminiScore = OcrConfidence.advisorScore(respLine.get("geminiConfidence"),
+                                respLine.get("geminiStatus"), respLine.get("geminiConfidenceSource"));
+                        line.setGeminiConfidence(geminiScore);
+                        line.setGeminiConfidenceSource(geminiScore != null ? OcrConfidence.AI_SELF_REPORTED : null);
                         line.setGeminiDecision((String) respLine.get("geminiDecision"));
                         line.setGeminiStatus((String) respLine.get("geminiStatus"));
+                        line.setGeminiModel((String) respLine.get("geminiModel"));
+                        if (respLine.get("suggestions") instanceof List<?>) {
+                            @SuppressWarnings("unchecked")
+                            List<Map<String, Object>> suggestions = (List<Map<String, Object>>) respLine.get("suggestions");
+                            line.setSuggestionsJson(objectMapper.writeValueAsString(OcrConfidence.suggestions(suggestions)));
+                        } else {
+                            line.setSuggestionsJson(null);
+                        }
+                        line.setCorrectionConfidence(null);
                         
                         if (Boolean.TRUE.equals(respLine.get("correctionApplied"))) {
                             line.setPredictedText((String) respLine.get("finalText"));

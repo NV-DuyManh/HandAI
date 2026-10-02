@@ -71,11 +71,13 @@ export function mergeTrialWithAdvisorUpdate(
         // Incorporate advisor updates so suggestions appear without altering user text
         groqSuggestion: incoming.groqSuggestion ?? existing.groqSuggestion,
         groqConfidence: incoming.groqConfidence ?? existing.groqConfidence,
+        groqConfidenceSource: incoming.groqConfidenceSource ?? existing.groqConfidenceSource,
         groqStatus: incoming.groqStatus ?? existing.groqStatus,
         groqModel: incoming.groqModel ?? existing.groqModel,
         groqDecision: incoming.groqDecision ?? existing.groqDecision,
         geminiSuggestion: incoming.geminiSuggestion ?? existing.geminiSuggestion,
         geminiConfidence: incoming.geminiConfidence ?? existing.geminiConfidence,
+        geminiConfidenceSource: incoming.geminiConfidenceSource ?? existing.geminiConfidenceSource,
         geminiStatus: incoming.geminiStatus ?? existing.geminiStatus,
         geminiModel: incoming.geminiModel ?? existing.geminiModel,
         geminiDecision: incoming.geminiDecision ?? existing.geminiDecision,

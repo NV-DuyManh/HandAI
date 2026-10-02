@@ -87,14 +87,14 @@ class SpanChange(BaseModel):
     raw_span: str = ""
     suggested_span: str = ""
     reason: str = ""
-    confidence: float = 0.0
+    confidence: Optional[float] = Field(None, ge=0.0, le=1.0, allow_inf_nan=False)
 
 
 class GroqOcrCorrectionResponse(BaseModel):
     raw_text: str
     suggested_text: str
     correction_needed: bool = False
-    confidence: float = 0.0
+    confidence: Optional[float] = Field(None, ge=0.0, le=1.0, allow_inf_nan=False)
     visual_support: str = Field(default="STRONG", description="Visual evidence: STRONG | MODERATE | WEAK")
     evidence_summary: str = Field(default="", description="Short machine-readable reason")
     edit_type: List[str] = Field(default_factory=list)
@@ -215,7 +215,7 @@ def should_request_groq_correction(
 def evaluate_correction_safety(
     raw_text: str,
     suggested_text: str,
-    groq_confidence: float,
+    groq_confidence: Optional[float],
     visual_support: str = "STRONG",
     is_uncertain: bool = False,
     domain: str = "HANDWRITING_TEXT",
@@ -238,6 +238,9 @@ def evaluate_correction_safety(
 
     if raw_clean == sug_clean:
         return "KEEP_RAW", 0.0, "no_change"
+
+    if groq_confidence is None:
+        return "KEEP_RAW", 0.0, "missing_provider_confidence"
 
     v_supp = visual_support.upper().strip()
     if is_uncertain or v_supp == "WEAK" or groq_confidence < 0.50:
@@ -416,7 +419,7 @@ async def request_groq_correction(
 
         logger.info(
             f"[GroqCorrector] raw={raw_text!r} -> suggested={correction_resp.suggested_text!r} "
-            f"conf={correction_resp.confidence:.2f} decision={decision} reason={reason} "
+            f"conf={correction_resp.confidence} decision={decision} reason={reason} "
             f"elapsed={time.time() - t0:.2f}s"
         )
         return correction_resp, decision, edit_ratio, reason

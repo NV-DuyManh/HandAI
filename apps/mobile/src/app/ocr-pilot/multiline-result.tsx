@@ -16,6 +16,7 @@ import { OcrPilotService, MultilineTrialResult, MultilineLineResult } from '../.
 import { logFlowDomain, submissionDraftStore } from '../../services/draft/submissionDraftStore';
 import {
   buildVisibleSuggestions,
+  buildAdvisorView,
   VisibleSuggestion,
   normalizeForComparison,
   getLineReviewStatus,
@@ -23,6 +24,7 @@ import {
 } from '../../utils/suggestionDedupe';
 import { isAdvisorPending, mergeTrialWithAdvisorUpdate } from '../../utils/mobileAsyncAdvisor';
 import { isHandAIMode } from '../../config/appMode';
+import { getRawOcrConfidence, OCR_CONFIDENCE_EXPLANATION } from '../../utils/ocrConfidence';
 import { handAiAnalyticsStore } from '../../services/analytics/handAiAnalyticsStore';
 
 export function getDecisionExplanation(
@@ -35,35 +37,35 @@ export function getDecisionExplanation(
 
   if (src === 'MANUAL_EDIT' || src === 'MANUAL') {
     return isHandAI
-      ? 'Manual edit verified by evaluator.'
+      ? 'Text edited by the user. Review it against the image.'
       : 'Đã tự sửa bởi người dùng.';
   }
 
   if (src === 'SUGGESTION_1' || src === 'SUGGESTION_2') {
     if (reason === 'USER_EXPLICIT_SELECTION') {
       return isHandAI
-        ? 'AI Suggestion selected by evaluator.'
+        ? 'AI candidate selected by the user.'
         : 'Gợi ý AI được người dùng chọn.';
     }
     if (reason === 'MULTI_PROVIDER_CONSENSUS') {
       return isHandAI
-        ? 'AI Suggestion selected because multi-provider consensus independently confirmed the spelling correction.'
+        ? 'Candidate selected because advisor response fields matched. Review it against the image.'
         : 'Gợi ý AI được tự động chọn vì các mô hình AI độc lập cùng đồng thuận xác nhận lỗi chính tả.';
     }
     if (reason === 'GARBLED_OCR_DETERMINISTIC_CORRECTION') {
       return isHandAI
-        ? 'AI Suggestion selected because OCR contained invalid Vietnamese spelling pattern and correction passed validation.'
+        ? 'Candidate selected by the spelling check. Review it against the image.'
         : 'Gợi ý AI được tự động chọn vì OCR gốc chứa mẫu âm vị tiếng Việt không hợp lệ và từ sửa đổi đạt chuẩn từ điển.';
     }
     return isHandAI
-      ? 'AI Suggestion selected based on candidate confidence validation.'
+      ? 'AI candidate currently selected. Review it against the image.'
       : 'Gợi ý AI được chọn theo độ tin cậy mô hình.';
   }
 
   // OCR
   if (state.isAiConfirmed) {
     return isHandAI
-      ? 'Raw OCR kept because AI model confirmed exact match with predicted handwriting.'
+      ? 'AI response matches the raw text. This does not verify the handwriting.'
       : 'Giữ OCR gốc vì mô hình AI đã xác nhận nội dung trùng khớp chính xác.';
   }
   if (reason === 'USER_EXPLICIT_SELECTION') {
@@ -72,7 +74,7 @@ export function getDecisionExplanation(
       : 'Giữ OCR gốc theo lựa chọn của người dùng.';
   }
   return isHandAI
-    ? 'Raw OCR kept because confidence is high and no stronger correction was found.'
+    ? 'Raw OCR currently selected. Review it against the image.'
     : 'Giữ OCR gốc vì độ tin cậy cao và không có đề xuất sửa đổi mạnh hơn.';
 }
 
@@ -86,75 +88,7 @@ export {
   mergeTrialWithAdvisorUpdate,
 };
 
-export interface AdvisorView {
-  provider: 'GROQ' | 'GEMINI';
-  model: string;
-  status: 'SUCCESS' | 'NOT_TRIGGERED' | 'UNAVAILABLE' | 'DISABLED' | 'ERROR';
-  text: string;
-  confidence: number;
-  decision?: string;
-  wasTriggered: boolean;
-}
-
-export function buildAdvisorView(line: MultilineLineResult, provider: 'GROQ' | 'GEMINI'): AdvisorView {
-  const fromSuggestions = Array.isArray(line.suggestions)
-    ? line.suggestions.find((s) => s.provider === provider)
-    : undefined;
-
-  let directText = provider === 'GROQ' ? line.groqSuggestion : line.geminiSuggestion;
-  const directStatus = provider === 'GROQ' ? line.groqStatus : line.geminiStatus;
-  const directModel = provider === 'GROQ' ? line.groqModel : line.geminiModel;
-  const directConfidence = provider === 'GROQ' ? line.groqConfidence : line.geminiConfidence;
-  const directDecision = provider === 'GROQ' ? line.groqDecision : line.geminiDecision;
-
-  // Fallback for Groq legacy correctedText
-  if (provider === 'GROQ' && !directText && line.correctedText && directStatus !== 'UNAVAILABLE') {
-    directText = line.correctedText;
-  }
-
-  const text = (directText || fromSuggestions?.text || '').trim();
-  const rawModel = directModel || fromSuggestions?.model;
-  const model = rawModel || provider;
-  const confidence = directConfidence ?? fromSuggestions?.confidence ?? 0.0;
-  const decision = directDecision || fromSuggestions?.decision || 'KEEP_RAW';
-
-  const wasTriggered = Boolean(
-    line.correctionApplied ||
-    (line.correctedText && line.correctedText !== line.rawOcrText) ||
-    line.groqStatus ||
-    line.geminiStatus ||
-    line.groqSuggestion ||
-    line.geminiSuggestion ||
-    (Array.isArray(line.suggestions) && line.suggestions.some((s) => s.provider === provider))
-  );
-
-  const rawStatus = (directStatus || fromSuggestions?.status || '').toUpperCase();
-  let status: 'SUCCESS' | 'NOT_TRIGGERED' | 'UNAVAILABLE' | 'DISABLED' | 'ERROR';
-
-  if (text.length > 0) {
-    status = 'SUCCESS';
-  } else if (rawStatus === 'UNAVAILABLE') {
-    status = 'UNAVAILABLE';
-  } else if (rawStatus === 'DISABLED') {
-    status = 'DISABLED';
-  } else if (rawStatus === 'ERROR') {
-    status = 'ERROR';
-  } else if (wasTriggered) {
-    status = 'UNAVAILABLE';
-  } else {
-    status = 'NOT_TRIGGERED';
-  }
-
-  return {
-    provider,
-    model,
-    status,
-    text,
-    confidence,
-    decision,
-    wasTriggered,
-  };
-}
+export { buildAdvisorView, type AdvisorView } from '../../utils/suggestionDedupe';
 
 export default function MultilineResultScreen() {
   const router = useRouter();
@@ -217,7 +151,7 @@ export default function MultilineResultScreen() {
     return () => {
       active = false;
     };
-  }, [trialId, router]);
+  }, [trialId, router, isHandAI]);
 
   const advisorPending = isAdvisorPending(trial);
 
@@ -451,7 +385,7 @@ export default function MultilineResultScreen() {
         const { ocrText, aiSuggestions, currentText, selectedSource, isAiConfirmed } = displayState;
         const rawText = line.rawOcrText || line.predictedText;
         const reviewStatus = getLineReviewStatus(line);
-        const rawOcrConf = displayState.rawOcrConfidence ?? line.rawOcrConfidence ?? line.confidence;
+        const rawOcrConf = getRawOcrConfidence(line);
         const rawOcrConfText = rawOcrConf != null ? `${(rawOcrConf * 100).toFixed(0)}%` : null;
 
         // Smart Suggestion Logic for HandAI (Phase 4):
@@ -466,7 +400,7 @@ export default function MultilineResultScreen() {
         const sourceLabel =
           selectedSource === 'MANUAL_EDIT' || selectedSource === 'manual_edit'
             ? 'MANUAL'
-            : selectedSource === 'SUGGESTION_1' || selectedSource === 'suggestion_1'
+            : selectedSource === 'SUGGESTION_1' || selectedSource === 'suggestion_1' || selectedSource === 'SUGGESTION_2' || selectedSource === 'suggestion_2'
             ? 'AI'
             : 'OCR';
 
@@ -487,11 +421,13 @@ export default function MultilineResultScreen() {
                 </Text>
               </View>
               <View style={styles.lineHeaderRight}>
-                {isHandAI && rawOcrConfText && (
-                  <View style={styles.confidencePill}>
-                    <Text style={styles.confidencePillText}>Confidence: {rawOcrConfText}</Text>
-                  </View>
-                )}
+                {isHandAI && rawOcrConfText ? (
+                  <TouchableOpacity style={styles.confidencePill} accessibilityRole="button"
+                    accessibilityLabel={`OCR score ${rawOcrConfText}, uncalibrated. Show explanation`}
+                    onPress={() => Alert.alert('OCR score · uncalibrated', OCR_CONFIDENCE_EXPLANATION)}>
+                    <Text style={styles.confidencePillText}>OCR score: {rawOcrConfText} ⓘ</Text>
+                  </TouchableOpacity>
+                ) : isHandAI ? <Text style={styles.confidencePillText}>OCR score not recorded</Text> : null}
                 <View style={[styles.badge, { backgroundColor: badgeBg }]}>
                   <Text style={[styles.badgeLabel, { color: badgeColor }]}>{badgeText}</Text>
                 </View>
@@ -510,7 +446,7 @@ export default function MultilineResultScreen() {
                     {hasAiConfirmedOcr && (
                       <View style={styles.aiConfirmedBadge}>
                         <Ionicons name="checkmark-circle" size={13} color="#166534" />
-                        <Text style={styles.aiConfirmedBadgeText}>AI Validation Passed</Text>
+                        <Text style={styles.aiConfirmedBadgeText}>AI agrees with text</Text>
                       </View>
                     )}
                   </View>
@@ -526,7 +462,7 @@ export default function MultilineResultScreen() {
                       <Text style={styles.researchSuggLabel}>AI Correction Candidate</Text>
                     </View>
                     <Text style={styles.researchSuggText}>
-                      "{firstCandidate.text}"
+                      {`"${firstCandidate.text}"`}
                     </Text>
                   </View>
                 ) : null}
@@ -534,7 +470,7 @@ export default function MultilineResultScreen() {
                 {/* 3. CONFIRMED RESULT (Strong Blue) */}
                 <View style={styles.researchResultBlock}>
                   <View style={styles.researchFieldHeaderRow}>
-                    <Text style={styles.researchResultLabel}>Confirmed Result</Text>
+                    <Text style={styles.researchResultLabel}>Current Selection</Text>
                     <View style={styles.researchSourceChip}>
                       <Text style={styles.researchSourceChipText}>SOURCE: {sourceLabel}</Text>
                     </View>
@@ -548,7 +484,7 @@ export default function MultilineResultScreen() {
                 <View style={styles.researchReasonBlock}>
                   <Text style={styles.researchReasonLabel}>DECISION REASON:</Text>
                   <Text style={styles.researchReasonText}>
-                    "{getDecisionExplanation(displayState, line, true)}"
+                    {`"${getDecisionExplanation(displayState, line, true)}"`}
                   </Text>
                 </View>
 
@@ -949,9 +885,9 @@ export default function MultilineResultScreen() {
               } as MultilineTrialResult);
             }
             Alert.alert(
-              isHandAI ? 'Evaluation Complete' : 'Thành công',
+              isHandAI ? 'Recognition Saved' : 'Thành công',
               isHandAI
-                ? 'All handwriting lines confirmed! View session analytics or finish.'
+                ? 'Your current selections were saved. Accuracy requires verified reference text.'
                 : 'Đã xác nhận toàn bộ các dòng chữ!',
               isHandAI
                 ? [

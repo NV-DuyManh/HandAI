@@ -8,7 +8,7 @@ import {
   Alert,
   ScrollView,
   Image,
-  Dimensions,
+  useWindowDimensions,
 } from 'react-native';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,12 +19,11 @@ import { isHandAIMode } from '../../config/appMode';
 import { normalizeLocalFileUri } from '../../services/image/imagePipeline';
 import { OCRProgressLoader, OcrPhase } from '../../components/ocr/OCRProgressLoader';
 
-const SCREEN_WIDTH = Dimensions.get('window').width;
-
 type RequestStatus = 'IDLE' | 'SUBMITTING' | 'SUCCESS' | 'ERROR' | 'CANCELLED';
 
 export default function MultilineReviewScreen() {
   const router = useRouter();
+  const { width: windowWidth } = useWindowDimensions();
   const isHandAI = isHandAIMode();
   const params = useLocalSearchParams();
   const draft = submissionDraftStore.getDraft();
@@ -54,7 +53,7 @@ export default function MultilineReviewScreen() {
   const [isNetworkError, setIsNetworkError] = useState(false);
   const [editMode, setEditMode] = useState<'MOVE' | 'RESIZE'>('MOVE');
 
-  const displayWidth = SCREEN_WIDTH - 32;
+  const displayWidth = Math.max(1, Math.min(windowWidth, 600) - 32);
   const detectRequestIdRef = useRef(0);
   const initialLoadDoneRef = useRef<string | null>(null);
   const lastProcessedUriRef = useRef<string | null>(null);
@@ -257,7 +256,9 @@ server response: status=200, lineCount=${incomingLines.length}
     );
   }, [imageUri, imageSessionId, loadAutoDetection, displayWidth, isHandAI, router]);
 
-  const scaleX = displayWidth / (origWidth || 1);
+  // The image and overlays share the same aspect-ratio-preserving canvas.
+  const imageDisplayWidth = Math.min(displayWidth, displayHeight * origWidth / (origHeight || 1));
+  const scaleX = imageDisplayWidth / (origWidth || 1);
   const scaleY = displayHeight / (origHeight || 1);
 
   const selectedBox = boxes.find((b) => b.line_id === selectedId);
@@ -480,10 +481,10 @@ server response: status=200, lineCount=${incomingLines.length}
       </Text>
 
       {/* Dominant Image Canvas Area */}
-      <View style={[styles.imageContainer, SHADOWS.small, { width: displayWidth, height: displayHeight }]}>
+      <View style={[styles.imageContainer, SHADOWS.small, { width: imageDisplayWidth, height: displayHeight, alignSelf: 'center' }]}>
         <Image
           source={{ uri: imageUri }}
-          style={{ width: displayWidth, height: displayHeight }}
+          style={{ width: imageDisplayWidth, height: displayHeight }}
           resizeMode="contain"
           onError={(e) => {
             console.error('[MULTILINE] Image load failed:', e.nativeEvent.error);

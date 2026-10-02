@@ -33,6 +33,7 @@ bin/
 # Temporary & PIDs
 infra/pids/
 scratch/
+.work/
 
 # Generated report previews and local document tooling
 report/**/python_deps/

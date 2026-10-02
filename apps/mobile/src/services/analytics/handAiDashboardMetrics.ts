@@ -20,6 +20,16 @@ export interface HandAiDashboardMetrics {
   hasLiveSessions: boolean;
   hasEvaluatedLines: boolean;
   totalSessions: number;
+  totalImages: number;
+  comparedSessions: number;
+  comparedImages: number;
+  comparisonLines: number;
+  aiResponseLines: number;
+  rawComparisonCorrectLines: number;
+  aiCorrectLines: number;
+  rawComparisonAccuracy: number | null;
+  aiAccuracy: number | null;
+  confidenceLineCount: number;
   totalLines: number;
   evaluatedLines: number;
   rawCorrectLines: number;
@@ -41,11 +51,11 @@ export interface HandAiDashboardMetrics {
 const round1 = (value: number): number => Math.round(value * 10) / 10;
 
 const normalizeMetricText = (value: string): string =>
-  value.trim().toLocaleLowerCase('vi-VN').replace(/\s+/g, ' ');
+  value.normalize('NFC').trim().replace(/\s+/g, ' ');
 
 const isMeasuredLine = (line: LineMetric): boolean =>
   line.evaluationStatus === 'EVALUATED' &&
-  (line.groundTruthStatus === 'EXPLICIT' || line.groundTruthStatus === 'USER_CONFIRMED') &&
+  (line.groundTruthStatus === 'EXPLICIT' || line.referenceSource === 'EXPLICIT_REFERENCE') &&
   normalizeMetricText(line.groundTruth).length > 0;
 
 const getRawText = (line: LineMetric): string =>
@@ -67,18 +77,29 @@ export function buildHandAiDashboardMetrics(
       session.totalLines > 0
   );
 
-  const measuredLines = sessions.flatMap((session) =>
-    (session.lineMetrics || []).filter(isMeasuredLine)
+  const processedLines = sessions.flatMap((session) =>
+    (session.lineMetrics || []).filter((line) => line.status !== 'Detection Failed')
   );
+  const measuredLines = processedLines.filter(isMeasuredLine);
+  const pairedLines = measuredLines.filter((line) => line.aiReviewRecorded === true && !!line.afterAiText?.trim());
+  const aiResponseLines = processedLines.filter((line) => line.aiReviewRecorded === true && !!line.afterAiText?.trim()).length;
+  const imageKey = (session: RecognitionSession): string | undefined =>
+    (session as RecognitionSession & { imageSha256?: string }).imageSha256 || session.imageUri || session.imageThumbnailUri;
+  const countImages = (items: RecognitionSession[]): number => new Set(items.map(imageKey).filter(Boolean)).size;
+  const pairedSessions = sessions.filter((session) => (session.lineMetrics || []).some((line) => pairedLines.includes(line)));
 
   const totalLines = sessions.reduce((sum, session) => sum + session.totalLines, 0);
   const evaluatedLines = measuredLines.length;
-  const rawCorrectLines = measuredLines.filter((line) => line.isRawCorrect).length;
-  const finalCorrectLines = measuredLines.filter((line) => line.isFinalCorrect).length;
-  const aiAssistedLines = measuredLines.filter(
+  const rawCorrectLines = measuredLines.filter((line) => normalizeMetricText(getRawText(line)) === normalizeMetricText(line.groundTruth)).length;
+  const finalCorrectLines = measuredLines.filter((line) => normalizeMetricText(getFinalText(line)) === normalizeMetricText(line.groundTruth)).length;
+  const rawComparisonCorrectLines = pairedLines.filter((line) => normalizeMetricText(getRawText(line)) === normalizeMetricText(line.groundTruth)).length;
+  const aiCorrectLines = pairedLines.filter((line) => normalizeMetricText(line.afterAiText!) === normalizeMetricText(line.groundTruth)).length;
+  const rawComparisonAccuracy = pairedLines.length ? round1(rawComparisonCorrectLines / pairedLines.length * 100) : null;
+  const aiAccuracy = pairedLines.length ? round1(aiCorrectLines / pairedLines.length * 100) : null;
+  const aiAssistedLines = processedLines.filter(
     (line) => line.decisionSource === 'AI_CORRECTION' || line.sourceDecision === 'AI_CORRECTION'
   ).length;
-  const manualEditedLines = measuredLines.filter(
+  const manualEditedLines = processedLines.filter(
     (line) => line.decisionSource === 'MANUAL_EDIT' || line.sourceDecision === 'MANUAL_EDIT'
   ).length;
 
@@ -112,16 +133,17 @@ export function buildHandAiDashboardMetrics(
     ? round1((rawWordEdits / referenceWords) * 100)
     : null;
 
-  const confidenceValues = measuredLines
+  const confidenceValues = processedLines
+    .filter((line) => line.confidenceSource === 'CRNN_CTC_SOFTMAX')
     .map((line) => line.confidence)
-    .filter((value) => Number.isFinite(value));
+    .filter((value) => Number.isFinite(value) && value >= 0 && value <= 100);
   const averageConfidence = confidenceValues.length > 0
     ? round1(confidenceValues.reduce((sum, value) => sum + value, 0) / confidenceValues.length)
     : null;
 
   const latencyValues = sessions
     .map((session) => session.processingTimeSeconds)
-    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0);
   const averageLatencySeconds = latencyValues.length > 0
     ? round1(latencyValues.reduce((sum, value) => sum + value, 0) / latencyValues.length)
     : null;
@@ -145,6 +167,16 @@ export function buildHandAiDashboardMetrics(
     hasLiveSessions: sessions.length > 0,
     hasEvaluatedLines: evaluatedLines > 0,
     totalSessions: sessions.length,
+    totalImages: countImages(sessions),
+    comparedSessions: pairedSessions.length,
+    comparedImages: countImages(pairedSessions),
+    comparisonLines: pairedLines.length,
+    aiResponseLines,
+    rawComparisonCorrectLines,
+    aiCorrectLines,
+    rawComparisonAccuracy,
+    aiAccuracy,
+    confidenceLineCount: confidenceValues.length,
     totalLines,
     evaluatedLines,
     rawCorrectLines,
@@ -154,8 +186,8 @@ export function buildHandAiDashboardMetrics(
     rawAccuracy,
     finalAccuracy,
     aiGain:
-      rawAccuracy !== null && finalAccuracy !== null
-        ? round1(finalAccuracy - rawAccuracy)
+      rawComparisonAccuracy !== null && aiAccuracy !== null
+        ? round1(aiAccuracy - rawComparisonAccuracy)
         : null,
     cer,
     characterAccuracy: cer === null ? null : round1(Math.max(0, 100 - cer)),

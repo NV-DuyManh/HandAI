@@ -17,11 +17,17 @@ async function postMultipart<T>(
   const path = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
 
   const formData = new FormData();
-  formData.append(fileField.key, {
-    uri: fileField.uri,
-    name: fileField.name,
-    type: fileField.type,
-  } as any);
+  if (Platform.OS === 'web') {
+    const imageResponse = await fetch(fileField.uri, { signal });
+    if (!imageResponse.ok) throw new Error('Could not read the selected image.');
+    formData.append(fileField.key, await imageResponse.blob(), fileField.name);
+  } else {
+    formData.append(fileField.key, {
+      uri: fileField.uri,
+      name: fileField.name,
+      type: fileField.type,
+    } as any);
+  }
 
   for (const [k, v] of Object.entries(stringParams)) {
     if (v !== undefined && v !== null) {
@@ -62,6 +68,7 @@ export interface OcrTrialResult {
   privacyConfirmed?: boolean;
   isTestData?: boolean;
   confidence?: number | null;
+  confidenceSource?: string | null;
   modelName?: string;
   modelVersion?: string;
   checkpointSha256?: string;
@@ -86,7 +93,8 @@ export interface AdvisorSuggestion {
   provider: 'GROQ' | 'GEMINI' | string;
   model?: string;
   text: string;
-  confidence: number;
+  confidence?: number | null;
+  confidenceSource?: string | null;
   visualSupport?: string;
   decision?: AdvisorDecision;
   status?: string;
@@ -101,7 +109,8 @@ export interface LineBox {
   order: number;
   text?: string;
   rawOcrText?: string;
-  rawOcrConfidence?: number;
+  rawOcrConfidence?: number | null;
+  rawOcrConfidenceSource?: string | null;
   correctedText?: string;
   correctionConfidence?: number;
   correctionApplied?: boolean;
@@ -114,12 +123,14 @@ export interface LineBox {
   blankRatio?: number;
   meanEntropy?: number;
   groqSuggestion?: string;
-  groqConfidence?: number;
+  groqConfidence?: number | null;
+  groqConfidenceSource?: string | null;
   groqDecision?: AdvisorDecision;
   groqStatus?: string;
   groqModel?: string;
   geminiSuggestion?: string;
-  geminiConfidence?: number;
+  geminiConfidence?: number | null;
+  geminiConfidenceSource?: string | null;
   geminiDecision?: AdvisorDecision;
   geminiStatus?: string;
   geminiModel?: string;
@@ -149,9 +160,10 @@ export interface MultilineLineResult {
   lineImageObjectKey?: string;
   lineImageSha256?: string;
   predictedText: string;
-  confidence?: number;
+  confidence?: number | null;
   rawOcrText?: string;
-  rawOcrConfidence?: number;
+  rawOcrConfidence?: number | null;
+  rawOcrConfidenceSource?: string | null;
   correctedText?: string;
   correctionConfidence?: number;
   correctionApplied?: boolean;
@@ -161,12 +173,14 @@ export interface MultilineLineResult {
   p10TokenConfidence?: number;
   meanTokenConfidence?: number;
   groqSuggestion?: string;
-  groqConfidence?: number;
+  groqConfidence?: number | null;
+  groqConfidenceSource?: string | null;
   groqDecision?: AdvisorDecision;
   groqStatus?: string;
   groqModel?: string;
   geminiSuggestion?: string;
-  geminiConfidence?: number;
+  geminiConfidence?: number | null;
+  geminiConfidenceSource?: string | null;
   geminiDecision?: AdvisorDecision;
   geminiStatus?: string;
   geminiModel?: string;
@@ -182,10 +196,14 @@ export interface MultilineLineResult {
   selectedSource?: string;
   selectionReason?: string;
   decisionReason?: string;
+  groundTruth?: string;
+  referenceConfirmed?: boolean;
 }
 
 export interface MultilineTrialResult {
   trialId: string;
+  /** Measured client duration of image preparation and the recognition request. */
+  totalLatencyMs?: number;
   userId?: string;
   source: string;
   pageImageObjectKey: string;
@@ -225,6 +243,11 @@ export class OcrPilotService {
 
   static getAllCachedTrials(): MultilineTrialResult[] {
     return Array.from(this.cachedTrials.values());
+  }
+
+  static removeCachedTrials(trialIds: string[]): void {
+    trialIds.forEach((id) => this.cachedTrials.delete(id));
+    this.clearDetectionCache();
   }
 
   static clearDetectionCache(): void {
@@ -466,15 +489,18 @@ export class OcrPilotService {
       text: effectiveFinal || effectiveOcr,
       rawOcrText: effectiveOcr,
       rawOcrConfidence: line.rawOcrConfidence ?? undefined,
+      rawOcrConfidenceSource: line.rawOcrConfidenceSource ?? undefined,
       finalText: effectiveFinal || effectiveOcr,
       predictedText: effectiveFinal || effectiveOcr,
       groqSuggestion: line.groqSuggestion ?? undefined,
       groqConfidence: line.groqConfidence ?? undefined,
+      groqConfidenceSource: line.groqConfidenceSource ?? undefined,
       groqDecision: line.groqDecision ?? undefined,
       groqStatus: line.groqStatus ?? undefined,
       groqModel: line.groqModel ?? undefined,
       geminiSuggestion: line.geminiSuggestion ?? undefined,
       geminiConfidence: line.geminiConfidence ?? undefined,
+      geminiConfidenceSource: line.geminiConfidenceSource ?? undefined,
       geminiDecision: line.geminiDecision ?? undefined,
       geminiStatus: line.geminiStatus ?? undefined,
       geminiModel: line.geminiModel ?? undefined,
@@ -526,6 +552,7 @@ export class OcrPilotService {
       clearTimeout(timeoutTimer);
 
       const totalMs = Date.now() - tStart;
+      res.totalLatencyMs = totalMs;
       console.log(`[OCR_METRICS] OCR_DONE | reqId=${reqId} | duration=${(totalMs / 1000).toFixed(2)}s`);
       onProgress?.(85, 'AI_CORRECTION');
 
@@ -555,7 +582,12 @@ export class OcrPilotService {
   static async getMultilineTrial(trialId: string): Promise<MultilineTrialResult> {
     const endpoint = this.getEndpoint(`/ocr/multiline/trials/${trialId}`);
     const response = await apiClient.get<MultilineTrialResult>(endpoint);
-    return response.data;
+    const trial = {
+      ...response.data,
+      totalLatencyMs: response.data.totalLatencyMs ?? this.getCachedTrial(trialId)?.totalLatencyMs,
+    };
+    this.cacheTrial(trial);
+    return trial;
   }
 
   static async submitLineFeedback(

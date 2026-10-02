@@ -190,7 +190,9 @@ async def request_document_gemini_correction(
 
     user_text = "Please analyze the following lines which are highlighted in the overlay:\n\n"
     for line_id, ldata in triggered_lines.items():
-        user_text += f"[{line_id}]\nRaw OCR: {ldata['raw_text']}\nOCR Confidence: {ldata['confidence']:.2f}\n\n"
+        confidence = ldata.get("confidence")
+        confidence_text = f"{confidence:.2f}" if confidence is not None else "unavailable"
+        user_text += f"[{line_id}]\nRaw OCR: {ldata['raw_text']}\nOCR Confidence: {confidence_text}\n\n"
     user_text += "Return structured JSON correction for all listed lines."
 
     max_attempts_cfg = getattr(settings, "gemini_max_key_attempts_per_request", 3)
@@ -303,7 +305,7 @@ async def request_gemini_document_correction(lines: List[Any], bgr_image: Option
     triggered = {}
     for idx, l in enumerate(lines):
         raw_text = getattr(l, "rawOcrText", None) or (l.get("rawOcrText") if isinstance(l, dict) else "") or ""
-        conf = getattr(l, "rawOcrConfidence", None) or (l.get("rawOcrConfidence") if isinstance(l, dict) else 0.8) or 0.8
+        conf = l.get("rawOcrConfidence") if isinstance(l, dict) else getattr(l, "rawOcrConfidence", None)
         bx = getattr(l, "x", 0) if not isinstance(l, dict) else l.get("x", 0)
         by = getattr(l, "y", 0) if not isinstance(l, dict) else l.get("y", 0)
         bw = getattr(l, "width", 100) if not isinstance(l, dict) else l.get("width", 100)
@@ -314,10 +316,7 @@ async def request_gemini_document_correction(lines: List[Any], bgr_image: Option
             "bbox": [bx, by, bw, bh]
         }
         
-    if bgr_image is None:
-        bgr_image = np.full((max(400, len(lines) * 60), 800, 3), 255, dtype=np.uint8)
-        
-    doc_results = await request_document_gemini_correction(bgr_image, triggered)
+    doc_results = await request_document_gemini_correction(bgr_image, triggered) if bgr_image is not None else None
     
     out = []
     for idx, l in enumerate(lines):
@@ -328,6 +327,7 @@ async def request_gemini_document_correction(lines: List[Any], bgr_image: Option
             out.append({
                 "corrected_text": r.suggested_text,
                 "confidence": r.confidence,
+                "confidenceSource": "AI_SELF_REPORTED" if r.confidence is not None else None,
                 "decision": dec,
                 "status": "SUCCESS",
                 "model": "gemini-3.6-flash"
@@ -335,7 +335,8 @@ async def request_gemini_document_correction(lines: List[Any], bgr_image: Option
         else:
             out.append({
                 "corrected_text": raw_text,
-                "confidence": getattr(l, "rawOcrConfidence", 0.8) if not isinstance(l, dict) else l.get("rawOcrConfidence", 0.8),
+                "confidence": None,
+                "confidenceSource": None,
                 "decision": "KEEP_RAW",
                 "status": "NOT_TRIGGERED" if doc_results is not None else "UNAVAILABLE",
                 "model": "gemini-3.6-flash"

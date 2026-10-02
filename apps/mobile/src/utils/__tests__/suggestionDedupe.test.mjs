@@ -451,9 +451,11 @@ console.log('=== RUNNING PROD.3B & PROD.3F MANDATORY TEST MATRIX ===\n');
     lineId: 'line-case-1',
     rawOcrText: 'Em yêu mùa hè',
     rawOcrConfidence: 0.88,
+    rawOcrConfidenceSource: 'CRNN_CTC_SOFTMAX',
     predictedText: 'Cm yêu mùa hè', // Simulated noise must be ignored
     groqSuggestion: 'Em yêu mùa hè',
     groqConfidence: 0.95,
+    groqConfidenceSource: 'AI_SELF_REPORTED',
     groqStatus: 'SUCCESS',
   };
   const state = resolveLineDisplayState(line);
@@ -476,12 +478,15 @@ console.log('=== RUNNING PROD.3B & PROD.3F MANDATORY TEST MATRIX ===\n');
     lineId: 'line-case-2',
     rawOcrText: 'Bó hoa si tím',
     rawOcrConfidence: 0.86,
+    rawOcrConfidenceSource: 'CRNN_CTC_SOFTMAX',
     predictedText: 'Bó hoa ssim tí', // Simulated noise must be ignored
     groqSuggestion: 'Bó hoa sim tím',
     groqConfidence: 0.97,
+    groqConfidenceSource: 'AI_SELF_REPORTED',
     groqStatus: 'SUCCESS',
     geminiSuggestion: 'Bó hoa sim tím',
     geminiConfidence: 0.96,
+    geminiConfidenceSource: 'AI_SELF_REPORTED',
     geminiStatus: 'SUCCESS',
   };
   const state = resolveLineDisplayState(line);
@@ -504,11 +509,14 @@ console.log('=== RUNNING PROD.3B & PROD.3F MANDATORY TEST MATRIX ===\n');
     lineId: 'line-case-3',
     rawOcrText: 'Trời, sao ngọt thề!',
     rawOcrConfidence: 0.89,
+    rawOcrConfidenceSource: 'CRNN_CTC_SOFTMAX',
     groqSuggestion: 'Trời, sao ngọt thế!',
     groqConfidence: 0.98,
+    groqConfidenceSource: 'AI_SELF_REPORTED',
     groqStatus: 'SUCCESS',
     geminiSuggestion: 'Trời, sao ngọt thế!',
     geminiConfidence: 0.97,
+    geminiConfidenceSource: 'AI_SELF_REPORTED',
     geminiStatus: 'SUCCESS',
   };
   const state = resolveLineDisplayState(line);
@@ -528,8 +536,10 @@ console.log('=== RUNNING PROD.3B & PROD.3F MANDATORY TEST MATRIX ===\n');
     lineId: 'line-case-4',
     rawOcrText: 'Ngôi trường mến yêu',
     rawOcrConfidence: 0.98,
+    rawOcrConfidenceSource: 'CRNN_CTC_SOFTMAX',
     groqSuggestion: 'Ngôi trường thân yêu',
     groqConfidence: 0.75,
+    groqConfidenceSource: 'AI_SELF_REPORTED',
     groqStatus: 'SUCCESS',
   };
   const state = resolveLineDisplayState(line);
@@ -549,8 +559,10 @@ console.log('=== RUNNING PROD.3B & PROD.3F MANDATORY TEST MATRIX ===\n');
     lineId: 'line-case-5',
     rawOcrText: 'Bó hoa si tím',
     rawOcrConfidence: 0.86,
+    rawOcrConfidenceSource: 'CRNN_CTC_SOFTMAX',
     groqSuggestion: 'Bó hoa sim tím',
     groqConfidence: 0.97,
+    groqConfidenceSource: 'AI_SELF_REPORTED',
     groqStatus: 'SUCCESS',
     verdict: 'CORRECT', // User explicitly pressed "Giữ OCR gốc"
   };
@@ -571,8 +583,10 @@ console.log('=== RUNNING PROD.3B & PROD.3F MANDATORY TEST MATRIX ===\n');
     lineId: 'line-case-6',
     rawOcrText: 'Trời, sao ngọt thề!',
     rawOcrConfidence: 0.89,
+    rawOcrConfidenceSource: 'CRNN_CTC_SOFTMAX',
     groqSuggestion: 'Trời, sao ngọt thế!',
     groqConfidence: 0.98,
+    groqConfidenceSource: 'AI_SELF_REPORTED',
     groqStatus: 'SUCCESS',
     verdict: 'CORRECTED',
     verifiedTextRaw: 'Trời, sao ngọt thế!', // User selected Gợi ý 1
@@ -594,8 +608,10 @@ console.log('=== RUNNING PROD.3B & PROD.3F MANDATORY TEST MATRIX ===\n');
     lineId: 'line-case-7',
     rawOcrText: 'Một đàn chym',
     rawOcrConfidence: 0.99,
+    rawOcrConfidenceSource: 'CRNN_CTC_SOFTMAX',
     groqSuggestion: 'Một đàn chim',
     groqConfidence: 0.99,
+    groqConfidenceSource: 'AI_SELF_REPORTED',
     groqStatus: 'SUCCESS',
     verdict: 'CORRECTED',
     verifiedTextRaw: 'Một đàn chim non', // User typed manual edit
@@ -617,9 +633,11 @@ console.log('=== RUNNING PROD.3B & PROD.3F MANDATORY TEST MATRIX ===\n');
     lineId: 'line-case-8-invariant',
     rawOcrText: 'Dòng chữ chuẩn',
     rawOcrConfidence: 0.90,
+    rawOcrConfidenceSource: 'CRNN_CTC_SOFTMAX',
     predictedText: 'Chuỗi lạ không hợp lệ', // Simulated illegal candidate
     groqSuggestion: 'Dòng chữ đẹp',
     groqConfidence: 0.85,
+    groqConfidenceSource: 'AI_SELF_REPORTED',
     groqStatus: 'SUCCESS',
   };
   const state = resolveLineDisplayState(line);
@@ -646,6 +664,7 @@ console.log('=== RUNNING PROD.3B & PROD.3F MANDATORY TEST MATRIX ===\n');
     lineId: 'line-outage',
     rawOcrText: 'Văn bản kiểm tra',
     rawOcrConfidence: 0.85,
+    rawOcrConfidenceSource: 'CRNN_CTC_SOFTMAX',
     groqStatus: 'UNAVAILABLE',
     geminiStatus: 'ERROR',
   };
@@ -664,11 +683,14 @@ console.log('=== RUNNING PROD.3B & PROD.3F MANDATORY TEST MATRIX ===\n');
     lineId: 'line-two-cands',
     rawOcrText: 'Cây bàng to',
     rawOcrConfidence: 0.80,
+    rawOcrConfidenceSource: 'CRNN_CTC_SOFTMAX',
     groqSuggestion: 'Cây bàng xanh',
     groqConfidence: 0.92,
+    groqConfidenceSource: 'AI_SELF_REPORTED',
     groqStatus: 'SUCCESS',
     geminiSuggestion: 'Cây bàng to lớn',
     geminiConfidence: 0.88,
+    geminiConfidenceSource: 'AI_SELF_REPORTED',
     geminiStatus: 'SUCCESS',
   };
   const suggestions = buildVisibleSuggestions(line);
@@ -692,8 +714,10 @@ console.log('=== RUNNING PROD.3B & PROD.3F MANDATORY TEST MATRIX ===\n');
     lineId: 'line-rung-ring-single-ai',
     rawOcrText: 'Rung ring bướm lượn.',
     rawOcrConfidence: 0.97,
+    rawOcrConfidenceSource: 'CRNN_CTC_SOFTMAX',
     groqSuggestion: 'Rung rinh bướm lượn.',
     groqConfidence: 0.95,
+    groqConfidenceSource: 'AI_SELF_REPORTED',
     groqStatus: 'SUCCESS',
   };
   const state = resolveLineDisplayState(line);
@@ -719,8 +743,10 @@ console.log('=== RUNNING PROD.3B & PROD.3F MANDATORY TEST MATRIX ===\n');
     lineId: 'line-decoupled-ai',
     rawOcrText: 'Có hoa sim tím',
     rawOcrConfidence: 0.92,
+    rawOcrConfidenceSource: 'CRNN_CTC_SOFTMAX',
     groqSuggestion: 'Có hoa sim tím',
     groqConfidence: 0.98,
+    groqConfidenceSource: 'AI_SELF_REPORTED',
     groqStatus: 'SUCCESS',
   };
   const state = resolveLineDisplayState(line);
@@ -743,8 +769,10 @@ console.log('=== RUNNING PROD.3B & PROD.3F MANDATORY TEST MATRIX ===\n');
     lineId: 'line-provenance-violation',
     rawOcrText: 'Mùa hè rực rỡ',
     rawOcrConfidence: 0.90,
+    rawOcrConfidenceSource: 'CRNN_CTC_SOFTMAX',
     groqSuggestion: 'Mùa hè rực rỡ nắng',
     groqConfidence: 0.92,
+    groqConfidenceSource: 'AI_SELF_REPORTED',
     groqStatus: 'SUCCESS',
   };
   const state = resolveLineDisplayState(line);
@@ -770,11 +798,14 @@ console.log('=== RUNNING PROD.3B & PROD.3F MANDATORY TEST MATRIX ===\n');
     lineId: 'line-rung-ring-consensus',
     rawOcrText: 'Rung ring bướm lượn.',
     rawOcrConfidence: 0.97,
+    rawOcrConfidenceSource: 'CRNN_CTC_SOFTMAX',
     groqSuggestion: 'Rung rinh bướm lượn.',
     groqConfidence: 0.95,
+    groqConfidenceSource: 'AI_SELF_REPORTED',
     groqStatus: 'SUCCESS',
     geminiSuggestion: 'Rung rinh bướm lượn.',
     geminiConfidence: 0.94,
+    geminiConfidenceSource: 'AI_SELF_REPORTED',
     geminiStatus: 'SUCCESS',
   };
   const state = resolveLineDisplayState(line);
@@ -797,8 +828,10 @@ console.log('=== RUNNING PROD.3B & PROD.3F MANDATORY TEST MATRIX ===\n');
     lineId: 'line-ai-wrong-char',
     rawOcrText: 'Bé học chăm chỉ',
     rawOcrConfidence: 0.96,
+    rawOcrConfidenceSource: 'CRNN_CTC_SOFTMAX',
     groqSuggestion: 'Bé học chăm chỉa',
     groqConfidence: 0.92,
+    groqConfidenceSource: 'AI_SELF_REPORTED',
     groqStatus: 'SUCCESS',
   };
   const state = resolveLineDisplayState(line);
@@ -820,8 +853,10 @@ console.log('=== RUNNING PROD.3B & PROD.3F MANDATORY TEST MATRIX ===\n');
     lineId: 'line-low-ocr-high-ai-single-provider',
     rawOcrText: 'Đêm nay trời rét',
     rawOcrConfidence: 0.50,
+    rawOcrConfidenceSource: 'CRNN_CTC_SOFTMAX',
     groqSuggestion: 'Đêm nay trời rét.',
     groqConfidence: 0.99,
+    groqConfidenceSource: 'AI_SELF_REPORTED',
     groqStatus: 'SUCCESS',
   };
   const state = resolveLineDisplayState(line);
@@ -845,8 +880,10 @@ console.log('=== RUNNING PROD.3B & PROD.3F MANDATORY TEST MATRIX ===\n');
     lineId: 'line-ocr-098-ai-090',
     rawOcrText: 'Con cò bé bé',
     rawOcrConfidence: 0.98,
+    rawOcrConfidenceSource: 'CRNN_CTC_SOFTMAX',
     groqSuggestion: 'Con cò bé tí',
     groqConfidence: 0.90,
+    groqConfidenceSource: 'AI_SELF_REPORTED',
     groqStatus: 'SUCCESS',
   };
   const state = resolveLineDisplayState(line);
@@ -877,8 +914,10 @@ console.log('=== RUNNING PROD.3B & PROD.3F MANDATORY TEST MATRIX ===\n');
     lineId: 'line-case-1-single-provider',
     rawOcrText: 'Rung ring bướm lượn.',
     rawOcrConfidence: 0.97,
+    rawOcrConfidenceSource: 'CRNN_CTC_SOFTMAX',
     groqSuggestion: 'Rung rinh bướm lượn.',
     groqConfidence: 0.95,
+    groqConfidenceSource: 'AI_SELF_REPORTED',
     groqStatus: 'SUCCESS',
     geminiStatus: 'UNAVAILABLE',
   };
@@ -903,11 +942,14 @@ console.log('=== RUNNING PROD.3B & PROD.3F MANDATORY TEST MATRIX ===\n');
     lineId: 'line-case-2-multi-provider',
     rawOcrText: 'Rung ring bướm lượn.',
     rawOcrConfidence: 0.97,
+    rawOcrConfidenceSource: 'CRNN_CTC_SOFTMAX',
     groqSuggestion: 'Rung rinh bướm lượn.',
     groqConfidence: 0.95,
+    groqConfidenceSource: 'AI_SELF_REPORTED',
     groqStatus: 'SUCCESS',
     geminiSuggestion: 'Rung rinh bướm lượn.',
     geminiConfidence: 0.94,
+    geminiConfidenceSource: 'AI_SELF_REPORTED',
     geminiStatus: 'SUCCESS',
   };
   const state = resolveLineDisplayState(line);
@@ -931,6 +973,7 @@ console.log('=== RUNNING PROD.3B & PROD.3F MANDATORY TEST MATRIX ===\n');
     lineId: 'line-manual-same-as-ocr',
     rawOcrText: 'Rung rinh bướm lượn.',
     rawOcrConfidence: 0.97,
+    rawOcrConfidenceSource: 'CRNN_CTC_SOFTMAX',
     verdict: 'CORRECTED',
     verifiedTextRaw: 'Rung rinh bướm lượn.',
     selectedSource: 'MANUAL_EDIT',
@@ -954,8 +997,10 @@ console.log('=== RUNNING PROD.3B & PROD.3F MANDATORY TEST MATRIX ===\n');
     lineId: 'line-user-sugg1-same-as-ocr',
     rawOcrText: 'Rung rinh bướm lượn.',
     rawOcrConfidence: 0.97,
+    rawOcrConfidenceSource: 'CRNN_CTC_SOFTMAX',
     groqSuggestion: 'Rung rinh bướm lượn.',
     groqConfidence: 0.98,
+    groqConfidenceSource: 'AI_SELF_REPORTED',
     groqStatus: 'SUCCESS',
     verdict: 'CORRECTED',
     verifiedTextRaw: 'Rung rinh bướm lượn.',
@@ -1039,11 +1084,14 @@ console.log('=== RUNNING PROD.3B & PROD.3F MANDATORY TEST MATRIX ===\n');
   const lineSuccess = {
     rawOcrText: 'Em yêu mùa hè',
     rawOcrConfidence: 0.90,
+    rawOcrConfidenceSource: 'CRNN_CTC_SOFTMAX',
     groqSuggestion: 'Em yêu mùa hè',
     groqConfidence: 0.95,
+    groqConfidenceSource: 'AI_SELF_REPORTED',
     groqStatus: 'SUCCESS',
     geminiSuggestion: 'Em yêu mùa hè',
     geminiConfidence: 0.95,
+    geminiConfidenceSource: 'AI_SELF_REPORTED',
     geminiStatus: 'SUCCESS',
   };
   const resolvedSuccess = resolveLineDisplayState(lineSuccess);
@@ -1055,6 +1103,7 @@ console.log('=== RUNNING PROD.3B & PROD.3F MANDATORY TEST MATRIX ===\n');
   const lineFailed = {
     rawOcrText: 'Em yêu mùa hè',
     rawOcrConfidence: 0.90,
+    rawOcrConfidenceSource: 'CRNN_CTC_SOFTMAX',
     groqStatus: 'UNAVAILABLE',
     geminiStatus: 'ERROR',
   };
@@ -1106,11 +1155,14 @@ console.log('=== RUNNING PROD.3B & PROD.3F MANDATORY TEST MATRIX ===\n');
   const line = {
     rawOcrText: 'Mọc trên đổi quề',
     rawOcrConfidence: 0.85,
+    rawOcrConfidenceSource: 'CRNN_CTC_SOFTMAX',
     groqSuggestion: 'Mọc trên đồi quê',
     groqConfidence: 0.97,
+    groqConfidenceSource: 'AI_SELF_REPORTED',
     groqStatus: 'SUCCESS',
     geminiSuggestion: 'Mọc trên đồi quê',
     geminiConfidence: 0.96,
+    geminiConfidenceSource: 'AI_SELF_REPORTED',
     geminiStatus: 'SUCCESS',
   };
   const state = resolveLineDisplayState(line);
@@ -1128,8 +1180,10 @@ console.log('=== RUNNING PROD.3B & PROD.3F MANDATORY TEST MATRIX ===\n');
   const line = {
     rawOcrText: 'Mọc trên đổi quề',
     rawOcrConfidence: 0.85,
+    rawOcrConfidenceSource: 'CRNN_CTC_SOFTMAX',
     groqSuggestion: 'Mọc trên đồi quê',
     groqConfidence: 0.97,
+    groqConfidenceSource: 'AI_SELF_REPORTED',
     groqStatus: 'SUCCESS',
     // Gemini is NOT available - no second independent provider
     geminiStatus: 'UNAVAILABLE',
@@ -1148,11 +1202,14 @@ console.log('=== RUNNING PROD.3B & PROD.3F MANDATORY TEST MATRIX ===\n');
   const line = {
     rawOcrText: 'Mọc trên đổi quề',
     rawOcrConfidence: 0.85,
+    rawOcrConfidenceSource: 'CRNN_CTC_SOFTMAX',
     groqSuggestion: 'Mọc trên đồi quê',
     groqConfidence: 0.97,
+    groqConfidenceSource: 'AI_SELF_REPORTED',
     groqStatus: 'SUCCESS',
     geminiSuggestion: 'Mọc trên đồi quê', // Same text but provider is UNAVAILABLE
     geminiConfidence: 0.96,
+    geminiConfidenceSource: 'AI_SELF_REPORTED',
     geminiStatus: 'UNAVAILABLE', // NOT SUCCESS
   };
   const state = resolveLineDisplayState(line);
@@ -1173,8 +1230,10 @@ console.log('=== RUNNING PROD.3B & PROD.3F MANDATORY TEST MATRIX ===\n');
   const line = {
     rawOcrText: originalRawOcrText,
     rawOcrConfidence: 0.90,
+    rawOcrConfidenceSource: 'CRNN_CTC_SOFTMAX',
     groqSuggestion: 'Em yêu mùa hè!',
     groqConfidence: 0.95,
+    groqConfidenceSource: 'AI_SELF_REPORTED',
     groqStatus: 'SUCCESS',
   };
   const state = resolveLineDisplayState(line);
@@ -1200,11 +1259,14 @@ console.log('=== RUNNING PROD.3B & PROD.3F MANDATORY TEST MATRIX ===\n');
     lineId: 'line-4-physical',
     rawOcrText: 'Rung sring bướm lượn.',
     rawOcrConfidence: 0.94,
+    rawOcrConfidenceSource: 'CRNN_CTC_SOFTMAX',
     groqSuggestion: 'Rung rinh bướm lượn.',
     groqConfidence: 0.98,
+    groqConfidenceSource: 'AI_SELF_REPORTED',
     groqStatus: 'SUCCESS',
     geminiSuggestion: 'Rung ring bướm lượn.',
     geminiConfidence: 0.95,
+    geminiConfidenceSource: 'AI_SELF_REPORTED',
     geminiStatus: 'SUCCESS',
   };
 
@@ -1222,8 +1284,10 @@ console.log('=== RUNNING PROD.3B & PROD.3F MANDATORY TEST MATRIX ===\n');
   const line = {
     rawOcrText: 'Em yêu mùa hè',
     rawOcrConfidence: 0.92,
+    rawOcrConfidenceSource: 'CRNN_CTC_SOFTMAX',
     groqSuggestion: 'Em yêu mùa thu',
     groqConfidence: 0.98,
+    groqConfidenceSource: 'AI_SELF_REPORTED',
     groqStatus: 'SUCCESS',
     geminiStatus: 'UNAVAILABLE',
   };
@@ -1239,11 +1303,14 @@ console.log('=== RUNNING PROD.3B & PROD.3F MANDATORY TEST MATRIX ===\n');
   const line = {
     rawOcrText: 'Mùa xq quê hương',
     rawOcrConfidence: 0.70,
+    rawOcrConfidenceSource: 'CRNN_CTC_SOFTMAX',
     groqSuggestion: 'Mùa xa quê hương',
     groqConfidence: 0.95,
+    groqConfidenceSource: 'AI_SELF_REPORTED',
     groqStatus: 'SUCCESS',
     geminiSuggestion: 'Mùa xưa quê hương',
     geminiConfidence: 0.95,
+    geminiConfidenceSource: 'AI_SELF_REPORTED',
     geminiStatus: 'SUCCESS',
   };
   const state = resolveLineDisplayState(line);
@@ -1259,8 +1326,10 @@ console.log('=== RUNNING PROD.3B & PROD.3F MANDATORY TEST MATRIX ===\n');
   const lineKeepOcr = {
     rawOcrText: 'Rung sring bướm lượn.',
     rawOcrConfidence: 0.94,
+    rawOcrConfidenceSource: 'CRNN_CTC_SOFTMAX',
     groqSuggestion: 'Rung rinh bướm lượn.',
     groqConfidence: 0.98,
+    groqConfidenceSource: 'AI_SELF_REPORTED',
     groqStatus: 'SUCCESS',
     verdict: 'CORRECT',
   };
@@ -1272,11 +1341,14 @@ console.log('=== RUNNING PROD.3B & PROD.3F MANDATORY TEST MATRIX ===\n');
   const lineSugg2 = {
     rawOcrText: 'Rung sring bướm lượn.',
     rawOcrConfidence: 0.94,
+    rawOcrConfidenceSource: 'CRNN_CTC_SOFTMAX',
     groqSuggestion: 'Rung rinh bướm lượn.',
     groqConfidence: 0.98,
+    groqConfidenceSource: 'AI_SELF_REPORTED',
     groqStatus: 'SUCCESS',
     geminiSuggestion: 'Rung ring bướm lượn.',
     geminiConfidence: 0.95,
+    geminiConfidenceSource: 'AI_SELF_REPORTED',
     geminiStatus: 'SUCCESS',
     selectedSource: 'SUGGESTION_2',
   };
@@ -1291,8 +1363,10 @@ console.log('=== RUNNING PROD.3B & PROD.3F MANDATORY TEST MATRIX ===\n');
   const lineManual = {
     rawOcrText: 'Rung sring bướm lượn.',
     rawOcrConfidence: 0.94,
+    rawOcrConfidenceSource: 'CRNN_CTC_SOFTMAX',
     groqSuggestion: 'Rung rinh bướm lượn.',
     groqConfidence: 0.98,
+    groqConfidenceSource: 'AI_SELF_REPORTED',
     groqStatus: 'SUCCESS',
     verdict: 'CORRECTED',
     verifiedTextRaw: 'Rung rinh bướm vàng bay.',
@@ -1310,11 +1384,14 @@ console.log('=== RUNNING PROD.3B & PROD.3F MANDATORY TEST MATRIX ===\n');
   const line = {
     rawOcrText: 'Rung sring bướm lượn.',
     rawOcrConfidence: 0.94,
+    rawOcrConfidenceSource: 'CRNN_CTC_SOFTMAX',
     groqSuggestion: 'Rung rinh bướm lượn.',
     groqConfidence: 0.98,
+    groqConfidenceSource: 'AI_SELF_REPORTED',
     groqStatus: 'SUCCESS',
     geminiSuggestion: 'Rung ring bướm lượn.',
     geminiConfidence: 0.95,
+    geminiConfidenceSource: 'AI_SELF_REPORTED',
     geminiStatus: 'SUCCESS',
   };
   const state = resolveLineDisplayState(line);
@@ -1334,11 +1411,14 @@ console.log('=== RUNNING PROD.3B & PROD.3F MANDATORY TEST MATRIX ===\n');
   const line = {
     rawOcrText: 'Rung sring bướm lượn.',
     rawOcrConfidence: 0.94,
+    rawOcrConfidenceSource: 'CRNN_CTC_SOFTMAX',
     groqSuggestion: 'Rung rinh bướm lượn.',
     groqConfidence: 0.98,
+    groqConfidenceSource: 'AI_SELF_REPORTED',
     groqStatus: 'SUCCESS',
     geminiSuggestion: 'Rung ring bướm lượn.',
     geminiConfidence: 0.95,
+    geminiConfidenceSource: 'AI_SELF_REPORTED',
     geminiStatus: 'SUCCESS',
   };
   const state = resolveLineDisplayState(line);

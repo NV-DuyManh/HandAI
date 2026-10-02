@@ -73,6 +73,8 @@ function normalizeDraftFileUri(uri?: string): string {
   if (
     !clean.startsWith('file://') &&
     !clean.startsWith('content://') &&
+    !clean.startsWith('blob:') &&
+    !clean.startsWith('data:') &&
     !clean.startsWith('http://') &&
     !clean.startsWith('https://')
   ) {

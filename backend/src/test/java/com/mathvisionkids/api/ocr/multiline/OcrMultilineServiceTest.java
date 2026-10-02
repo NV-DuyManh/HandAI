@@ -19,6 +19,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
@@ -185,5 +186,137 @@ public class OcrMultilineServiceTest {
         assertEquals("Bó hoa sim tím", response.getLines().get(0).getPredictedText());
         assertEquals("Em yêu mùa hè", response.getLines().get(1).getRawOcrText());
         assertEquals("Em yêu mùa hè", response.getLines().get(1).getPredictedText());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void recognizeLinePersistsActualScoreAndProvenance() throws Exception {
+        preparePersistence();
+        when(restTemplate.exchange(anyString(), any(), any(), any(org.springframework.core.ParameterizedTypeReference.class)))
+                .thenReturn(ResponseEntity.ok(Map.of("recognized_text", "raw OCR", "confidence", 0.824,
+                        "confidence_source", "CRNN_CTC_SOFTMAX")));
+
+        LineBoxDto box = new LineBoxDto("manual", 0, 0, 100, 30, 1, null);
+        MultilineLineResponse line = service.createTrialAndRecognize(testImage(), null, "CAMERA", true,
+                new java.util.ArrayList<>(List.of(box)), null).getLines().get(0);
+
+        assertEquals(0.824, line.getRawOcrConfidence());
+        assertEquals("CRNN_CTC_SOFTMAX", line.getRawOcrConfidenceSource());
+        org.mockito.ArgumentCaptor<OcrMultilineLine> captor = org.mockito.ArgumentCaptor.forClass(OcrMultilineLine.class);
+        verify(lineRepository).save(captor.capture());
+        assertEquals(0.824, captor.getValue().getRawOcrConfidence());
+        assertEquals("CRNN_CTC_SOFTMAX", captor.getValue().getRawOcrConfidenceSource());
+    }
+
+    @Test
+    void confirmedBoxesPreserveMeasuredRawScoreAndExcludeUnknownScores() throws Exception {
+        preparePersistence();
+        LineBoxDto real = new LineBoxDto("real", 0, 0, 100, 30, 1, "AI selected text");
+        real.setRawOcrText("raw OCR");
+        real.setRawOcrConfidence(0.79);
+        real.setRawOcrConfidenceSource("CRNN_CTC_SOFTMAX");
+        real.setFinalText("AI selected text");
+        real.setGroqConfidence(0.85);
+        real.setGroqConfidenceSource("AI_SELF_REPORTED");
+        real.setGroqStatus("SUCCESS");
+        real.setGeminiConfidence(0.99);
+        real.setGeminiConfidenceSource("AI_SELF_REPORTED");
+        real.setGeminiStatus("UNAVAILABLE");
+        LineBoxDto legacy = new LineBoxDto("legacy", 0, 35, 100, 30, 2, null);
+        legacy.setRawOcrText("legacy OCR");
+        legacy.setRawOcrConfidence(0.99);
+
+        MultilineTrialResponse response = service.createTrialAndRecognize(testImage(), null, "CAMERA", true,
+                new java.util.ArrayList<>(List.of(real, legacy)), null);
+
+        assertEquals("raw OCR", response.getLines().get(0).getRawOcrText());
+        assertEquals("AI selected text", response.getLines().get(0).getPredictedText());
+        assertEquals(0.79, response.getLines().get(0).getRawOcrConfidence());
+        assertEquals(0.85, response.getLines().get(0).getGroqConfidence());
+        assertNull(response.getLines().get(0).getGeminiConfidence());
+        assertNull(response.getLines().get(1).getRawOcrConfidence());
+        assertNull(response.getLines().get(1).getRawOcrConfidenceSource());
+        verifyNoInteractions(restTemplate);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void detectionDropsInvalidOrUnprovenScores() {
+        LineBoxDto box = new LineBoxDto("l1", 0, 0, 100, 30, 1, null);
+        box.setRawOcrConfidence(Double.NaN);
+        box.setRawOcrConfidenceSource("CRNN_CTC_SOFTMAX");
+        box.setGroqConfidence(0.98);
+        box.setGroqStatus("SUCCESS");
+        when(restTemplate.exchange(anyString(), any(), any(), eq(MultilineDetectResponse.class)))
+                .thenReturn(ResponseEntity.ok(MultilineDetectResponse.builder().lines(List.of(box)).build()));
+
+        LineBoxDto returned = service.detectLines(new MockMultipartFile("image", "page.jpg", "image/jpeg", new byte[]{1}), true)
+                .getLines().get(0);
+        assertNull(returned.getRawOcrConfidence());
+        assertNull(returned.getRawOcrConfidenceSource());
+        assertNull(returned.getGroqConfidence());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void backgroundAdvisorsReceiveOriginalImageAndPreserveOnlyTaggedScores() throws Exception {
+        ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
+        MockMultipartFile image = testImage();
+        byte[] bytes = image.getBytes();
+        OcrMultilineTrial trial = new OcrMultilineTrial();
+        java.util.UUID trialId = java.util.UUID.randomUUID();
+        trial.setTrialId(trialId);
+        trial.setPageImageObjectKey("original.jpg");
+        trial.setPageImageSha256(java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(bytes)));
+        OcrMultilineLine line = new OcrMultilineLine();
+        line.setRawOcrText("raw OCR");
+        line.setGroqStatus("UNAVAILABLE");
+        line.setGroqModel("old-model");
+        line.setSuggestionsJson("[{\"provider\":\"GROQ\",\"status\":\"UNAVAILABLE\",\"text\":\"\"}]");
+        when(trialRepository.findById(trialId)).thenReturn(java.util.Optional.of(trial));
+        when(lineRepository.findByTrialOrderByLineOrderAsc(trial)).thenReturn(List.of(line));
+        when(objectStorageService.loadBytes("original.jpg")).thenReturn(bytes);
+        Map<String, Object> advisor = Map.of("groqConfidence", 0.83, "groqConfidenceSource", "AI_SELF_REPORTED",
+                "groqStatus", "SUCCESS", "groqModel", "actual-cloud-model", "groqSuggestion", "actual suggestion",
+                "geminiConfidence", 0.99, "geminiConfidenceSource", "AI_SELF_REPORTED",
+                "geminiStatus", "UNAVAILABLE", "geminiModel", "gemini-model",
+                "suggestions", List.of(Map.of("provider", "GROQ", "model", "actual-cloud-model",
+                        "status", "SUCCESS", "text", "actual suggestion", "confidence", 0.83,
+                        "confidenceSource", "AI_SELF_REPORTED")));
+        when(restTemplate.exchange(contains("/advise-lines"), any(), any(), any(org.springframework.core.ParameterizedTypeReference.class)))
+                .thenReturn(ResponseEntity.ok(Map.of("lines", List.of(advisor))));
+
+        ReflectionTestUtils.invokeMethod(service, "runBackgroundAdvisors", trialId, "req-1");
+
+        org.mockito.ArgumentCaptor<HttpEntity> captor = org.mockito.ArgumentCaptor.forClass(HttpEntity.class);
+        verify(restTemplate).exchange(contains("/advise-lines"), any(), captor.capture(), any(org.springframework.core.ParameterizedTypeReference.class));
+        Map<String, Object> request = (Map<String, Object>) captor.getValue().getBody();
+        assertEquals(java.util.Base64.getEncoder().encodeToString(bytes), request.get("imageBase64"));
+        assertEquals(0.83, line.getGroqConfidence());
+        assertEquals("AI_SELF_REPORTED", line.getGroqConfidenceSource());
+        assertEquals("actual-cloud-model", line.getGroqModel());
+        assertEquals("gemini-model", line.getGeminiModel());
+        MultilineLineResponse refreshed = MultilineLineResponse.fromEntity(line);
+        assertEquals("SUCCESS", refreshed.getGroqStatus());
+        assertEquals("actual suggestion", refreshed.getGroqSuggestion());
+        assertEquals("actual-cloud-model", refreshed.getSuggestions().get(0).get("model"));
+        assertNull(line.getGeminiConfidence());
+        assertNull(line.getGeminiConfidenceSource());
+    }
+
+    private void preparePersistence() {
+        when(trialRepository.save(any())).thenAnswer(invocation -> {
+            OcrMultilineTrial trial = invocation.getArgument(0);
+            if (trial.getTrialId() == null) trial.setTrialId(java.util.UUID.randomUUID());
+            return trial;
+        });
+        when(lineRepository.save(any(OcrMultilineLine.class))).thenAnswer(invocation -> invocation.getArgument(0));
+    }
+
+    private MockMultipartFile testImage() throws Exception {
+        java.awt.image.BufferedImage image = new java.awt.image.BufferedImage(100, 100, java.awt.image.BufferedImage.TYPE_INT_RGB);
+        java.io.ByteArrayOutputStream output = new java.io.ByteArrayOutputStream();
+        javax.imageio.ImageIO.write(image, "jpg", output);
+        return new MockMultipartFile("image", "page.jpg", "image/jpeg", output.toByteArray());
     }
 }

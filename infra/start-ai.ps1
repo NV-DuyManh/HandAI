@@ -34,7 +34,6 @@ Write-Host "[2/3] Launching FastAPI AI service on 0.0.0.0:8001..." -ForegroundCo
 $proc = Start-Process -FilePath $PythonExe `
     -ArgumentList "-m uvicorn app.main:app --host 0.0.0.0 --port 8001" `
     -WorkingDirectory $AiDir `
-
     -RedirectStandardOutput $LogFile `
     -RedirectStandardError $ErrLog `
     -WindowStyle Hidden `

@@ -92,6 +92,9 @@ public class OcrTrial {
     @Column(name = "confidence")
     private java.math.BigDecimal confidence;
 
+    @Column(name = "confidence_source")
+    private String confidenceSource;
+
     @com.fasterxml.jackson.annotation.JsonProperty("userId")
     public UUID getUserId() {
         return user != null ? user.getId() : null;

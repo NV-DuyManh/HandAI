@@ -30,6 +30,7 @@ public class OcrTrialResponse {
     @com.fasterxml.jackson.annotation.JsonProperty("isTestData")
     private boolean isTestData;
     private java.math.BigDecimal confidence;
+    private String confidenceSource;
     private String modelName;
     private String modelVersion;
     private String checkpointSha256;
@@ -39,6 +40,7 @@ public class OcrTrialResponse {
     private Instant feedbackAt;
 
     public static OcrTrialResponse fromEntity(OcrTrial trial) {
+        Double score = OcrConfidence.rawScore(trial.getConfidence(), trial.getConfidenceSource());
         return OcrTrialResponse.builder()
                 .trialId(trial.getTrialId())
                 .status("COMPLETED")
@@ -53,7 +55,8 @@ public class OcrTrialResponse {
                 .trainingEligible(trial.isTrainingEligible())
                 .privacyConfirmed(trial.isPrivacyConfirmed())
                 .isTestData(trial.isTestData())
-                .confidence(trial.getConfidence())
+                .confidence(score != null ? java.math.BigDecimal.valueOf(score) : null)
+                .confidenceSource(score != null ? OcrConfidence.CRNN_CTC_SOFTMAX : null)
                 .modelName(trial.getModelName())
                 .modelVersion(trial.getModelVersion())
                 .checkpointSha256(trial.getCheckpointSha256())

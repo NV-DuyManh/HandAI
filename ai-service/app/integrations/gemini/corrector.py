@@ -131,7 +131,7 @@ def levenshtein_distance(s1: str, s2: str) -> int:
 def evaluate_gemini_safety(
     raw_text: str,
     suggested_text: str,
-    gemini_confidence: float,
+    gemini_confidence: Optional[float],
     domain: str = "HANDWRITING_TEXT",
     auto_apply_confidence: float = 0.94,
     max_edit_ratio: float = 0.35,
@@ -156,6 +156,9 @@ def evaluate_gemini_safety(
 
     if raw_clean == sugg_clean:
         return "KEEP_RAW", 0.0, "no_change"
+
+    if gemini_confidence is None:
+        return "KEEP_RAW", 0.0, "missing_provider_confidence"
 
     # Arithmetic protection
     if domain == "ARITHMETIC":

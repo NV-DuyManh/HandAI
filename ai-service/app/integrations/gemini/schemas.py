@@ -10,7 +10,7 @@ class GeminiSpanChange(BaseModel):
     raw_span: str
     suggested_span: str
     reason: str
-    confidence: float = 1.0
+    confidence: Optional[float] = Field(None, ge=0.0, le=1.0, allow_inf_nan=False)
 
 
 class GeminiOcrCorrectionResponse(BaseModel):
@@ -18,7 +18,7 @@ class GeminiOcrCorrectionResponse(BaseModel):
     raw_text: str
     suggested_text: str
     correction_needed: bool = True
-    confidence: float = Field(default=0.9, ge=0.0, le=1.0)
+    confidence: Optional[float] = Field(None, ge=0.0, le=1.0, allow_inf_nan=False)
     visual_support: str = "STRONG"  # "STRONG" | "MODERATE" | "WEAK"
     changes: List[GeminiSpanChange] = []
     alternative_suggestions: List[str] = Field(default_factory=list, description="Optional secondary candidates")
@@ -36,21 +36,12 @@ class GeminiOcrCorrectionResponse(BaseModel):
             return "STRONG"
         return "STRONG"
 
-    @field_validator("confidence", mode="before")
-    @classmethod
-    def validate_confidence(cls, v) -> float:
-        try:
-            val = float(v)
-            return max(0.0, min(1.0, val))
-        except (ValueError, TypeError):
-            return 0.9
-
-
 
 class AdvisorSuggestion(BaseModel):
     provider: str  # "GROQ" | "GEMINI"
     text: str
-    confidence: float = 0.0
+    confidence: Optional[float] = Field(None, ge=0.0, le=1.0, allow_inf_nan=False)
+    confidenceSource: Optional[str] = None
     visualSupport: str = "STRONG"
     decision: str = "SUGGEST_ONLY"  # "AUTO_APPLY" | "SUGGEST_ONLY" | "KEEP_RAW"
     status: str = "SUCCESS"  # "SUCCESS" | "UNAVAILABLE" | "SKIPPED"

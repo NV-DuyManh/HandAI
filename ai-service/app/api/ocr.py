@@ -1,4 +1,5 @@
 import io
+import base64
 import os
 import json
 import hashlib
@@ -834,7 +835,8 @@ async def detect_lines_endpoint(request: Request):
             for line, (raw_text, unc_data) in zip(lines, batch_results):
                 setattr(line, "_crnn_ms", crnn_total_ms / len(lines)) # approximate per-line avg
                 line.rawOcrText = raw_text
-                line.rawOcrConfidence = unc_data.get("rawCrnnConfidence", 0.0)
+                line.rawOcrConfidence = unc_data.get("rawCrnnConfidence")
+                line.rawOcrConfidenceSource = "CRNN_CTC_SOFTMAX" if line.rawOcrConfidence is not None else None
                 line.minTokenConfidence = unc_data.get("minTokenConfidence")
                 line.p10TokenConfidence = unc_data.get("p10TokenConfidence")
                 line.meanTokenConfidence = unc_data.get("meanTokenConfidence")
@@ -872,11 +874,13 @@ async def detect_lines_endpoint(request: Request):
                 line.suggestions = []
                 line.groqSuggestion = None
                 line.groqConfidence = None
+                line.groqConfidenceSource = None
                 line.groqDecision = None
                 line.groqStatus = None
                 line.groqModel = getattr(settings, "groq_primary_vision_model", "qwen/qwen3.8-27b")
                 line.geminiSuggestion = None
                 line.geminiConfidence = None
+                line.geminiConfidenceSource = None
                 line.geminiDecision = None
                 line.geminiStatus = None
                 line.geminiModel = getattr(settings, "gemini_model", "gemini-3.6-flash")
@@ -1003,6 +1007,7 @@ async def detect_lines_endpoint(request: Request):
                             line.correctionDecision = canonical_groq_dec
                             line.groqSuggestion = corr_obj.suggested_text
                             line.groqConfidence = corr_obj.confidence
+                            line.groqConfidenceSource = "AI_SELF_REPORTED" if corr_obj.confidence is not None else None
                             line.groqDecision = canonical_groq_dec
                             line.groqStatus = "SUCCESS"
                             line.correctionApplied = False
@@ -1029,6 +1034,7 @@ async def detect_lines_endpoint(request: Request):
                             canonical_gem_dec = normalize_canonical_advisor_decision(gem_dec)
                             line.geminiSuggestion = gem_obj.suggested_text
                             line.geminiConfidence = gem_obj.confidence
+                            line.geminiConfidenceSource = "AI_SELF_REPORTED" if gem_obj.confidence is not None else None
                             line.geminiDecision = canonical_gem_dec
                             line.geminiStatus = "SUCCESS"
                         elif gemini_active:
@@ -1044,7 +1050,8 @@ async def detect_lines_endpoint(request: Request):
                                 "provider": "GROQ",
                                 "model": settings.groq_primary_vision_model,
                                 "text": line.groqSuggestion,
-                                "confidence": line.groqConfidence or 0.0,
+                                "confidence": line.groqConfidence,
+                                "confidenceSource": line.groqConfidenceSource,
                                 "visualSupport": getattr(corr_obj, "visual_support", "STRONG"),
                                 "decision": normalize_canonical_advisor_decision(line.groqDecision),
                                 "status": "SUCCESS"
@@ -1054,7 +1061,8 @@ async def detect_lines_endpoint(request: Request):
                                 "provider": "GROQ",
                                 "model": settings.groq_primary_vision_model,
                                 "text": "",
-                                "confidence": 0.0,
+                                "confidence": None,
+                                "confidenceSource": None,
                                 "visualSupport": "NONE",
                                 "decision": "KEEP_RAW",
                                 "status": line.groqStatus
@@ -1065,7 +1073,8 @@ async def detect_lines_endpoint(request: Request):
                                 "provider": "GEMINI",
                                 "model": line.geminiModel or getattr(settings, "gemini_model", "gemini-3.6-flash"),
                                 "text": line.geminiSuggestion,
-                                "confidence": line.geminiConfidence or 0.0,
+                                "confidence": line.geminiConfidence,
+                                "confidenceSource": line.geminiConfidenceSource,
                                 "visualSupport": getattr(gem_obj, "visual_support", "STRONG"),
                                 "decision": normalize_canonical_advisor_decision(line.geminiDecision),
                                 "status": "SUCCESS"
@@ -1075,7 +1084,8 @@ async def detect_lines_endpoint(request: Request):
                                 "provider": "GEMINI",
                                 "model": line.geminiModel or getattr(settings, "gemini_model", "gemini-3.6-flash"),
                                 "text": "",
-                                "confidence": 0.0,
+                                "confidence": None,
+                                "confidenceSource": None,
                                 "visualSupport": "NONE",
                                 "decision": "KEEP_RAW",
                                 "status": line.geminiStatus
@@ -1126,11 +1136,13 @@ async def detect_lines_endpoint(request: Request):
                 line.suggestions = []
                 line.groqSuggestion = None
                 line.groqConfidence = None
+                line.groqConfidenceSource = None
                 line.groqDecision = None
                 line.groqStatus = None
                 line.groqModel = getattr(settings, "groq_primary_vision_model", "qwen/qwen3.8-27b")
                 line.geminiSuggestion = None
                 line.geminiConfidence = None
+                line.geminiConfidenceSource = None
                 line.geminiDecision = None
                 line.geminiStatus = None
                 line.geminiModel = getattr(settings, "gemini_model", "gemini-3.6-flash")
@@ -1350,6 +1362,7 @@ async def recognize_line(request: Request):
             vocab_sha256=VOCAB_SHA256,
             preprocessing_version="v1_resize_64x1024_imagenet",
             confidence=confidence,
+            confidence_source="CRNN_CTC_SOFTMAX",
             latency_ms=round(latency_ms, 2),
         )
     except Exception as e:
@@ -1360,74 +1373,7 @@ async def recognize_line(request: Request):
 from pydantic import BaseModel
 class AdviseLinesRequest(BaseModel):
     lines: List[LineBox]
-    
-def _apply_local_vietnamese_advisor(lines: List[LineBox]) -> None:
-    import difflib
-    from app.canonical.fixtures import CANONICAL_FIXTURES
-
-    canonical_lines = [cl for f in CANONICAL_FIXTURES for cl in f.canonical_lines]
-
-    for line in lines:
-        raw_clean = (line.rawOcrText or line.text or "").strip()
-        if not raw_clean:
-            continue
-
-        best_match = None
-        best_ratio = 0.0
-        for cand in canonical_lines:
-            ratio = difflib.SequenceMatcher(None, raw_clean.lower(), cand.lower()).ratio()
-            if ratio > best_ratio:
-                best_ratio = ratio
-                best_match = cand
-
-        if best_match and best_ratio >= 0.70:
-            is_identical = (raw_clean == best_match)
-            suggested = best_match
-            confidence = 0.96 if not is_identical else 0.99
-            decision = "AUTO_APPLY" if not is_identical else "KEEP_RAW"
-        else:
-            suggested = raw_clean
-            confidence = 0.88
-            decision = "KEEP_RAW"
-            if "ring" in raw_clean.lower() and "lượn" in raw_clean.lower():
-                suggested = raw_clean.replace("ring", "rinh").replace("Ring", "Rinh")
-                decision = "AUTO_APPLY"
-                confidence = 0.94
-
-        line.groqSuggestion = suggested
-        line.groqConfidence = confidence
-        line.groqDecision = decision
-        line.groqStatus = "SUCCESS"
-        line.groqModel = "Local-Advisor"
-
-        line.geminiSuggestion = suggested
-        line.geminiConfidence = confidence
-        line.geminiDecision = decision
-        line.geminiStatus = "SUCCESS"
-        line.geminiModel = "Local-Advisor"
-
-        line.suggestions = [
-            {
-                "provider": "GROQ",
-                "text": suggested,
-                "confidence": confidence,
-                "decision": decision,
-                "status": "SUCCESS",
-            },
-            {
-                "provider": "GEMINI",
-                "text": suggested,
-                "confidence": confidence,
-                "decision": decision,
-                "status": "SUCCESS",
-            }
-        ]
-
-        if decision == "AUTO_APPLY":
-            line.finalText = suggested
-            line.correctedText = suggested
-            line.correctionApplied = True
-            line.correctionDecision = "LOCAL_ADVISOR_APPLY"
+    imageBase64: Optional[str] = None
 
 
 @router.post("/advise-lines")
@@ -1437,7 +1383,7 @@ async def advise_lines_endpoint(request: Request):
     BACKGROUND ADVISOR PATH.
     Accepts raw CRNN lines, runs Groq and Gemini sequentially or asynchronously in a document batch,
     applies the Safe Arbitration Rule, and returns the AI suggestions.
-    Falls back to Local Vietnamese Advisor if cloud advisors are not configured or fail.
+    Missing image or unavailable providers preserve raw OCR with null advisor scores.
     """
     from app.integrations.groq.document_corrector import request_groq_document_correction
     from app.integrations.gemini.document_corrector import request_gemini_document_correction
@@ -1456,6 +1402,19 @@ async def advise_lines_endpoint(request: Request):
         if "order" not in ld:
             ld["order"] = i + 1
     lines = [LineBox(**l) for l in lines_data]
+
+    bgr_image = None
+    if body.get("imageBase64"):
+        try:
+            image_bytes = base64.b64decode(body["imageBase64"], validate=True)
+            if len(image_bytes) > MAX_PAYLOAD_BYTES:
+                raise HTTPException(status_code=413, detail="Image payload exceeds maximum size")
+            pil_image = ImageOps.exif_transpose(Image.open(io.BytesIO(image_bytes))).convert("RGB")
+            bgr_image = cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2BGR)
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid advisor image")
     
     groq_active = bool(settings.groq_enabled and getattr(settings, "groq_post_correction_enabled", True))
     gemini_active = bool(getattr(settings, "gemini_enabled", False) and getattr(settings, "gemini_post_correction_enabled", True))
@@ -1463,10 +1422,10 @@ async def advise_lines_endpoint(request: Request):
     import asyncio
     
     # Run Groq Document Corrector
-    groq_task = asyncio.create_task(request_groq_document_correction(lines)) if groq_active else None
+    groq_task = asyncio.create_task(request_groq_document_correction(lines, bgr_image)) if groq_active and bgr_image is not None else None
     
     # Run Gemini Document Corrector
-    gemini_task = asyncio.create_task(request_gemini_document_correction(lines)) if gemini_active else None
+    gemini_task = asyncio.create_task(request_gemini_document_correction(lines, bgr_image)) if gemini_active and bgr_image is not None else None
     
     groq_results = []
     gemini_results = []
@@ -1484,7 +1443,6 @@ async def advise_lines_endpoint(request: Request):
             logger.error(f"Gemini advisor failed: {e}")
             
     # Apply Safe Arbitration Rules
-    any_cloud_advisor_succeeded = False
     for i, line in enumerate(lines):
         groq_corr = groq_results[i] if groq_results and i < len(groq_results) else None
         gemini_corr = gemini_results[i] if gemini_results and i < len(gemini_results) else None
@@ -1492,22 +1450,37 @@ async def advise_lines_endpoint(request: Request):
         g_sugg = groq_corr["corrected_text"] if groq_corr and groq_corr["status"] == "SUCCESS" else None
         gem_sugg = gemini_corr["corrected_text"] if gemini_corr and gemini_corr["status"] == "SUCCESS" else None
         
+        line.groqSuggestion = g_sugg
+        line.groqConfidence = groq_corr.get("confidence") if g_sugg else None
+        line.groqConfidenceSource = "AI_SELF_REPORTED" if line.groqConfidence is not None else None
+        line.groqDecision = normalize_canonical_advisor_decision(groq_corr.get("decision") if groq_corr else None)
+        line.groqStatus = groq_corr.get("status", "UNAVAILABLE") if groq_corr else ("UNAVAILABLE" if groq_active else "DISABLED")
+        line.groqModel = groq_corr.get("model") if groq_corr else None
+
+        line.geminiSuggestion = gem_sugg
+        line.geminiConfidence = gemini_corr.get("confidence") if gem_sugg else None
+        line.geminiConfidenceSource = "AI_SELF_REPORTED" if line.geminiConfidence is not None else None
+        line.geminiDecision = normalize_canonical_advisor_decision(gemini_corr.get("decision") if gemini_corr else None)
+        line.geminiStatus = gemini_corr.get("status", "UNAVAILABLE") if gemini_corr else ("UNAVAILABLE" if gemini_active else "DISABLED")
+        line.geminiModel = gemini_corr.get("model") if gemini_corr else None
+        line.suggestions = [
+            {"provider": "GROQ", "model": line.groqModel, "text": g_sugg or "", "confidence": line.groqConfidence,
+             "confidenceSource": line.groqConfidenceSource, "decision": line.groqDecision, "status": line.groqStatus},
+            {"provider": "GEMINI", "model": line.geminiModel, "text": gem_sugg or "", "confidence": line.geminiConfidence,
+             "confidenceSource": line.geminiConfidenceSource, "decision": line.geminiDecision, "status": line.geminiStatus},
+        ]
+        line.finalText = line.rawOcrText or line.text or ""
+        line.text = line.finalText
+        line.predictedText = line.finalText
+        line.correctedText = None
+        line.correctionConfidence = None
+        line.correctionApplied = False
+        line.correctionDecision = "KEEP_RAW"
+
         if g_sugg or gem_sugg:
-            any_cloud_advisor_succeeded = True
-            line.groqSuggestion = g_sugg
-            line.groqConfidence = groq_corr.get("confidence", 0.0) if groq_corr else 0.0
-            line.groqDecision = groq_corr.get("decision", "ERROR") if groq_corr else "ERROR"
-            line.groqStatus = groq_corr.get("status", "ERROR") if groq_corr else "ERROR"
-            line.groqModel = groq_corr.get("model", "") if groq_corr else ""
-            
-            line.geminiSuggestion = gem_sugg
-            line.geminiConfidence = gemini_corr.get("confidence", 0.0) if gemini_corr else 0.0
-            line.geminiDecision = gemini_corr.get("decision", "ERROR") if gemini_corr else "ERROR"
-            line.geminiStatus = gemini_corr.get("status", "ERROR") if gemini_corr else "ERROR"
-            line.geminiModel = gemini_corr.get("model", "") if gemini_corr else ""
             
             # Arbitration
-            raw = line.rawOcrText
+            raw = line.rawOcrText or ""
             if g_sugg and gem_sugg and g_sugg == gem_sugg and g_sugg != raw:
                 line.finalText = g_sugg
                 line.correctedText = g_sugg
@@ -1516,7 +1489,7 @@ async def advise_lines_endpoint(request: Request):
                 continue
                 
             if g_sugg and g_sugg != raw:
-                if len(raw) > len(g_sugg) and raw.startswith(g_sugg) and raw[-1] == raw[-2]:
+                if len(raw) >= 2 and len(raw) > len(g_sugg) and raw.startswith(g_sugg) and raw[-1] == raw[-2]:
                     line.finalText = g_sugg
                     line.correctedText = g_sugg
                     line.correctionApplied = True
@@ -1524,15 +1497,15 @@ async def advise_lines_endpoint(request: Request):
                     continue
                     
             if gem_sugg and gem_sugg != raw:
-                if len(raw) > len(gem_sugg) and raw.startswith(gem_sugg) and raw[-1] == raw[-2]:
+                if len(raw) >= 2 and len(raw) > len(gem_sugg) and raw.startswith(gem_sugg) and raw[-1] == raw[-2]:
                     line.finalText = gem_sugg
                     line.correctedText = gem_sugg
                     line.correctionApplied = True
                     line.correctionDecision = "DETERMINISTIC_APPLY"
                     continue
 
-    # Fallback to Local Vietnamese Advisor if cloud advisors returned no suggestions
-    if not any_cloud_advisor_succeeded:
-        _apply_local_vietnamese_advisor(lines)
-        
-    return {"lines": [l.dict() for l in lines]}
+    for line in lines:
+        line.text = line.finalText
+        line.predictedText = line.finalText
+
+    return {"lines": [l.model_dump() for l in lines]}

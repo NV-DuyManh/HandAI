@@ -1,5 +1,6 @@
 package com.mathvisionkids.api.ocr.multiline;
 
+import com.mathvisionkids.api.ocr.OcrConfidence;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -30,6 +31,7 @@ public class MultilineLineResponse {
 
     private String rawOcrText;
     private Double rawOcrConfidence;
+    private String rawOcrConfidenceSource;
     private String correctedText;
     private Double correctionConfidence;
     private Boolean correctionApplied;
@@ -38,12 +40,14 @@ public class MultilineLineResponse {
 
     private String groqSuggestion;
     private Double groqConfidence;
+    private String groqConfidenceSource;
     private String groqDecision;
     private String groqStatus;
     private String groqModel;
 
     private String geminiSuggestion;
     private Double geminiConfidence;
+    private String geminiConfidenceSource;
     private String geminiDecision;
     private String geminiStatus;
     private String geminiModel;
@@ -63,6 +67,22 @@ public class MultilineLineResponse {
             } catch (Exception ignored) {}
         }
 
+        boolean localSubstitution = "LOCAL_ADVISOR_APPLY".equalsIgnoreCase(entity.getCorrectionDecision());
+        boolean groqRejected = localSubstitution || providerEvidenceRejected(parsedSuggestions, "GROQ");
+        boolean geminiRejected = localSubstitution || providerEvidenceRejected(parsedSuggestions, "GEMINI");
+        String groqStatus = groqRejected ? "UNAVAILABLE" : entity.getGroqStatus();
+        String geminiStatus = geminiRejected ? "UNAVAILABLE" : entity.getGeminiStatus();
+        java.util.List<java.util.Map<String, Object>> safeSuggestions = localSubstitution ? java.util.List.of() : parsedSuggestions;
+        if (safeSuggestions != null) {
+            safeSuggestions = safeSuggestions.stream().filter(item -> item != null &&
+                    !(groqRejected && "GROQ".equals(item.get("provider"))) &&
+                    !(geminiRejected && "GEMINI".equals(item.get("provider")))).toList();
+        }
+
+        Double rawScore = OcrConfidence.rawScore(entity.getRawOcrConfidence(), entity.getRawOcrConfidenceSource());
+        Double groqScore = OcrConfidence.advisorScore(entity.getGroqConfidence(), groqStatus, entity.getGroqConfidenceSource());
+        Double geminiScore = OcrConfidence.advisorScore(entity.getGeminiConfidence(), geminiStatus, entity.getGeminiConfidenceSource());
+
         return MultilineLineResponse.builder()
                 .lineId(entity.getLineId())
                 .lineOrder(entity.getLineOrder())
@@ -79,24 +99,39 @@ public class MultilineLineResponse {
                 .trainingEligible(entity.isTrainingEligible())
                 .feedbackAt(entity.getFeedbackAt())
                 .rawOcrText(entity.getRawOcrText())
-                .rawOcrConfidence(entity.getRawOcrConfidence())
+                .rawOcrConfidence(rawScore)
+                .rawOcrConfidenceSource(rawScore != null ? OcrConfidence.CRNN_CTC_SOFTMAX : null)
                 .correctedText(entity.getCorrectedText())
-                .correctionConfidence(entity.getCorrectionConfidence())
+                .correctionConfidence(null)
                 .correctionApplied(entity.getCorrectionApplied())
                 .correctionDecision(entity.getCorrectionDecision())
                 .finalText(entity.getPredictedText())
-                .groqSuggestion(entity.getGroqSuggestion())
-                .groqConfidence(entity.getGroqConfidence())
-                .groqDecision(entity.getGroqDecision())
-                .groqStatus(entity.getGroqStatus())
+                .groqSuggestion(groqRejected ? null : entity.getGroqSuggestion())
+                .groqConfidence(groqScore)
+                .groqConfidenceSource(groqScore != null ? OcrConfidence.AI_SELF_REPORTED : null)
+                .groqDecision(groqRejected ? "KEEP_RAW" : entity.getGroqDecision())
+                .groqStatus(groqStatus)
                 .groqModel(entity.getGroqModel())
-                .geminiSuggestion(entity.getGeminiSuggestion())
-                .geminiConfidence(entity.getGeminiConfidence())
-                .geminiDecision(entity.getGeminiDecision())
-                .geminiStatus(entity.getGeminiStatus())
+                .geminiSuggestion(geminiRejected ? null : entity.getGeminiSuggestion())
+                .geminiConfidence(geminiScore)
+                .geminiConfidenceSource(geminiScore != null ? OcrConfidence.AI_SELF_REPORTED : null)
+                .geminiDecision(geminiRejected ? "KEEP_RAW" : entity.getGeminiDecision())
+                .geminiStatus(geminiStatus)
                 .geminiModel(entity.getGeminiModel())
-                .suggestions(parsedSuggestions)
+                .suggestions(OcrConfidence.suggestions(safeSuggestions))
                 .build();
+    }
+
+    private static boolean providerEvidenceRejected(java.util.List<java.util.Map<String, Object>> suggestions, String provider) {
+        if (suggestions == null) return false;
+        boolean hasExplicitFailure = false;
+        for (java.util.Map<String, Object> suggestion : suggestions) {
+            if (suggestion == null || !provider.equals(suggestion.get("provider"))) continue;
+            String status = String.valueOf(suggestion.getOrDefault("status", "")).trim();
+            if ("SUCCESS".equalsIgnoreCase(status)) return false;
+            if (!status.isBlank()) hasExplicitFailure = true;
+        }
+        return hasExplicitFailure;
     }
 }
 

@@ -36,9 +36,10 @@ class LineBox(BaseModel):
     text: Optional[str] = None
     rawOcrText: Optional[str] = None
     predictedText: Optional[str] = None
-    rawOcrConfidence: Optional[float] = None
+    rawOcrConfidence: Optional[float] = Field(None, ge=0.0, le=1.0, allow_inf_nan=False)
+    rawOcrConfidenceSource: Optional[str] = None
     correctedText: Optional[str] = None
-    correctionConfidence: Optional[float] = None
+    correctionConfidence: Optional[float] = Field(None, ge=0.0, le=1.0, allow_inf_nan=False)
     correctionApplied: bool = False
     correctionDecision: Optional[str] = None
     finalText: Optional[str] = None
@@ -52,14 +53,16 @@ class LineBox(BaseModel):
 
     # Groq Advisor 1 explicit fields (mirrored from correctedText for clarity)
     groqSuggestion: Optional[str] = None
-    groqConfidence: Optional[float] = None
+    groqConfidence: Optional[float] = Field(None, ge=0.0, le=1.0, allow_inf_nan=False)
+    groqConfidenceSource: Optional[str] = None
     groqDecision: Optional[str] = None
     groqStatus: Optional[str] = None
     groqModel: Optional[str] = None
 
     # Gemini Advisor 2 explicit fields
     geminiSuggestion: Optional[str] = None
-    geminiConfidence: Optional[float] = None
+    geminiConfidence: Optional[float] = Field(None, ge=0.0, le=1.0, allow_inf_nan=False)
+    geminiConfidenceSource: Optional[str] = None
     geminiDecision: Optional[str] = None
     geminiStatus: Optional[str] = None
     geminiModel: Optional[str] = None
@@ -82,5 +85,6 @@ class OcrRecognizeLineResponse(BaseModel):
     checkpoint_sha256: str
     vocab_sha256: str
     preprocessing_version: str = "v1_resize_64x1024_imagenet"
-    confidence: Optional[float] = Field(None, description="Calibrated confidence score if available; otherwise null (no fake 1.0)")
+    confidence: Optional[float] = Field(None, ge=0.0, le=1.0, allow_inf_nan=False, description="Uncalibrated mean of CRNN emitted-character peak softmax scores; not line accuracy")
+    confidence_source: Optional[str] = None
     latency_ms: float

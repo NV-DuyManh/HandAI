@@ -1,7 +1,8 @@
 # infra/start-mobile.ps1
 # HandAI - Start Expo Mobile Scanner UI with LAN & Firewall Fallback
 param(
-    [int]$Port = 0
+    [int]$Port = 0,
+    [switch]$Tunnel
 )
 
 $ErrorActionPreference = "Stop"
@@ -72,15 +73,9 @@ if ($metroPort -eq 8081) {
     Release-Port -TargetPort 8081 | Out-Null
 }
 
-# Step 4: Start Expo Metro Bundler in LAN mode
+# Step 4: Start Expo Metro Bundler
 $MobileDir = Join-Path $RepoRoot "apps\mobile"
 Set-Location $MobileDir
-
-Write-Host "`n[4/4] Starting Expo Metro Bundler on port $metroPort (LAN: $lanIp)..." -ForegroundColor Cyan
-Write-Host "  Metro URL: http://$lanIp`:$metroPort" -ForegroundColor Cyan
-Write-Host "  Expo QR:   exp://$lanIp`:$metroPort" -ForegroundColor Cyan
-Write-Host "  Command:   npx expo start --lan --port $metroPort --clear" -ForegroundColor Gray
-Write-Host ""
 
 # Set environment variables so Metro packager and mobile app target active LAN IP
 $env:REACT_NATIVE_PACKAGER_HOSTNAME = $lanIp
@@ -90,4 +85,16 @@ $env:EXPO_PUBLIC_AI_PORT = "8001"
 $env:EXPO_PUBLIC_API_URL = "http://${lanIp}:8080/api/v1"
 $env:EXPO_PUBLIC_AI_SERVICE_URL = "http://${lanIp}:8001"
 
-& cmd.exe /c "set REACT_NATIVE_PACKAGER_HOSTNAME=$lanIp && npx expo start --lan --port $metroPort --clear"
+if ($Tunnel) {
+    Write-Host "`n[4/4] Starting Expo Metro Bundler in TUNNEL mode..." -ForegroundColor Cyan
+    Write-Host "  Command: npx expo start --tunnel --clear" -ForegroundColor Gray
+    Write-Host ""
+    & cmd.exe /c "npx expo start --tunnel --clear"
+} else {
+    Write-Host "`n[4/4] Starting Expo Metro Bundler on port $metroPort (LAN: $lanIp)..." -ForegroundColor Cyan
+    Write-Host "  Metro URL: http://$lanIp`:$metroPort" -ForegroundColor Cyan
+    Write-Host "  Expo QR:   exp://$lanIp`:$metroPort" -ForegroundColor Cyan
+    Write-Host "  Command:   npx expo start --lan --port $metroPort --clear" -ForegroundColor Gray
+    Write-Host ""
+    & cmd.exe /c "set REACT_NATIVE_PACKAGER_HOSTNAME=$lanIp && npx expo start --lan --port $metroPort --clear"
+}

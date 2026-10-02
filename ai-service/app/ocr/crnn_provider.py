@@ -205,9 +205,10 @@ class CrnnOcrProvider(OcrProvider):
 
     def _decode_logits_with_uncertainty(self, logits: torch.Tensor) -> List[Tuple[str, Dict[str, Any]]]:
         """
-        CTC decode with mathematically grounded sequence confidence, uncertainty features,
+        CTC decode with uncalibrated model scores, uncertainty features,
         character-level visual evidence, and beam-search top-k hypotheses:
-        - rawCrnnConfidence: arithmetic mean of emitted non-blank character probabilities
+        - rawCrnnConfidence: arithmetic mean of peak softmax scores per emitted non-blank character
+          (not a calibrated probability that the whole line is correct)
         - minTokenConfidence: minimum non-blank emitted token probability
         - p10TokenConfidence: 10th percentile token probability
         - meanTokenConfidence: same as rawCrnnConfidence
@@ -337,6 +338,7 @@ class CrnnOcrProvider(OcrProvider):
 
             uncertainty_data = {
                 "rawCrnnConfidence": round(raw_conf, 4),
+                "rawOcrConfidenceSource": "CRNN_CTC_SOFTMAX",
                 "minTokenConfidence": round(min_conf, 4),
                 "p10TokenConfidence": round(p10_conf, 4),
                 "meanTokenConfidence": round(raw_conf, 4),

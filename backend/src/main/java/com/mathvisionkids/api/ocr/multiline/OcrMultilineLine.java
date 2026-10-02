@@ -82,6 +82,9 @@ public class OcrMultilineLine {
     @Column(name = "raw_ocr_confidence")
     private Double rawOcrConfidence;
 
+    @Column(name = "raw_ocr_confidence_source")
+    private String rawOcrConfidenceSource;
+
     @Column(name = "corrected_text")
     private String correctedText;
 
@@ -100,6 +103,9 @@ public class OcrMultilineLine {
     @Column(name = "groq_confidence")
     private Double groqConfidence;
 
+    @Column(name = "groq_confidence_source")
+    private String groqConfidenceSource;
+
     @Column(name = "groq_decision")
     private String groqDecision;
 
@@ -114,6 +120,9 @@ public class OcrMultilineLine {
 
     @Column(name = "gemini_confidence")
     private Double geminiConfidence;
+
+    @Column(name = "gemini_confidence_source")
+    private String geminiConfidenceSource;
 
     @Column(name = "gemini_decision")
     private String geminiDecision;

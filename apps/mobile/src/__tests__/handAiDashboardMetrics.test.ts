@@ -25,6 +25,9 @@ const makeLine = (overrides: Partial<LineMetric>): LineMetric =>
     sourceDecision: 'AI_CORRECTION',
     decisionSource: 'AI_CORRECTION',
     confidence: 80,
+    confidenceSource: 'CRNN_CTC_SOFTMAX',
+    aiReviewRecorded: true,
+    afterAiText: 'xin chào',
     isCorrect: true,
     correctionType: 'AI_CORRECTED',
     status: 'Corrected',
@@ -75,6 +78,7 @@ const makeSession = (overrides: Partial<RecognitionSession>): RecognitionSession
         finalText: 'bé học bài',
         finalResult: 'bé học bài',
         groundTruth: 'bé học bài',
+        afterAiText: 'bé học bài',
         source: 'CRNN',
         sourceDecision: 'CRNN_RAW',
         decisionSource: 'CRNN_RAW',
@@ -135,5 +139,58 @@ describe('buildHandAiDashboardMetrics', () => {
     expect(metrics.finalAccuracy).toBeNull();
     expect(metrics.cer).toBeNull();
     expect(metrics.wer).toBeNull();
+    expect(metrics.averageConfidence).toBe(80);
+    expect(metrics.aiAssistedLines).toBe(1);
+    expect(metrics.averageLatencySeconds).toBe(2.4);
+  });
+
+  it('uses recorded processed-line confidence and excludes failed or missing measurements', () => {
+    const metrics = buildHandAiDashboardMetrics([makeSession({
+      processingTimeSeconds: undefined,
+      lineMetrics: [
+        makeLine({ groundTruthStatus: 'MISSING', confidence: 79 }),
+        makeLine({ groundTruthStatus: 'MISSING', confidence: 95, decisionSource: 'MANUAL_EDIT' }),
+        makeLine({ groundTruthStatus: 'MISSING', confidence: Number.NaN }),
+        makeLine({ status: 'Detection Failed', confidence: 0 }),
+      ],
+    })]);
+    expect(metrics.averageConfidence).toBe(87);
+    expect(metrics.manualEditedLines).toBe(1);
+    expect(metrics.finalAccuracy).toBeNull();
+    expect(metrics.averageLatencySeconds).toBeNull();
+  });
+
+  it('does not credit manual selection as an AI gain and uses a paired reference subset', () => {
+    const metrics = buildHandAiDashboardMetrics([makeSession({ imageUri: 'image-a', lineMetrics: [
+      makeLine({ afterAiText: 'xin chao', finalResult: 'xin chào', decisionSource: 'MANUAL_EDIT' }),
+      makeLine({ lineId: 'not-reviewed', aiReviewRecorded: false, afterAiText: undefined }),
+    ] })]);
+    expect(metrics.rawComparisonAccuracy).toBe(0);
+    expect(metrics.aiAccuracy).toBe(0);
+    expect(metrics.aiGain).toBe(0);
+    expect(metrics.comparisonLines).toBe(1);
+    expect(metrics.comparedImages).toBe(1);
+    expect(metrics.comparedSessions).toBe(1);
+    expect(metrics.finalAccuracy).toBe(100);
+  });
+
+  it('excludes untagged legacy scores and selection-confirmed references, retaining genuine zero', () => {
+    const metrics = buildHandAiDashboardMetrics([makeSession({ lineMetrics: [
+      makeLine({ confidence: 99, confidenceSource: undefined, groundTruthStatus: 'USER_CONFIRMED' }),
+      makeLine({ confidence: 0, groundTruthStatus: 'EXPLICIT', aiReviewRecorded: false }),
+    ] })]);
+    expect(metrics.averageConfidence).toBe(0);
+    expect(metrics.confidenceLineCount).toBe(1);
+    expect(metrics.evaluatedLines).toBe(1);
+    expect(metrics.aiGain).toBeNull();
+  });
+
+  it('counts image hashes once across repeated sessions and preserves case in exact matches', () => {
+    const first = makeSession({ imageSha256: 'same-photo', lineMetrics: [makeLine({ groundTruth: 'Xin chao', ocrOutput: 'xin chao' })] });
+    const second = makeSession({ sessionId: 'repeat', imageSha256: 'same-photo', lineMetrics: [makeLine({})] });
+    const metrics = buildHandAiDashboardMetrics([first, second]);
+    expect(metrics.totalImages).toBe(1);
+    expect(metrics.totalSessions).toBe(2);
+    expect(metrics.rawAccuracy).toBe(0);
   });
 });

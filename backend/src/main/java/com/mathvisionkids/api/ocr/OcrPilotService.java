@@ -112,7 +112,9 @@ public class OcrPilotService {
             trial.setDataOrigin(Boolean.TRUE.equals(isTestData) ? "AUTOMATED_TEST" : "PHYSICAL_USER");
             trial.setPrivacyConfirmed(privacyConfirmed != null ? privacyConfirmed : false);
             trial.setTrainingEligible(false);
-            trial.setConfidence(null); // No fabricated confidence
+            Double score = OcrConfidence.rawScore(aiData.get("confidence"), aiData.get("confidence_source"));
+            trial.setConfidence(score != null ? java.math.BigDecimal.valueOf(score) : null);
+            trial.setConfidenceSource(score != null ? OcrConfidence.CRNN_CTC_SOFTMAX : null);
 
             OcrTrial saved = ocrTrialRepository.save(trial);
             return OcrTrialResponse.fromEntity(saved);

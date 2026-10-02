@@ -33,6 +33,24 @@ import {
 } from '../services/analytics/handAiAnalyticsStore';
 import { normalizeLocalFileUri, normalizeFileUri, resolveSafeCropImage } from '../services/image/imagePipeline';
 
+// References are independent literal test answers, never inferred from a chosen result.
+function addReferenceAnswers(trial: MultilineTrialResult, references: Record<string, string>): void {
+  trial.lines.forEach((line) => {
+    if (Object.prototype.hasOwnProperty.call(references, line.lineId)) {
+      (line as any).groundTruth = references[line.lineId];
+    }
+  });
+}
+
+function addMeasuredOcrScores(trial: MultilineTrialResult, scores: Record<string, number>): void {
+  trial.lines.forEach((line) => {
+    if (Object.prototype.hasOwnProperty.call(scores, line.lineId)) {
+      line.rawOcrConfidence = scores[line.lineId];
+      line.rawOcrConfidenceSource = 'CRNN_CTC_SOFTMAX';
+    }
+  });
+}
+
 describe('HandAI Flow, Image Lifecycle & Analytics Suite', () => {
   beforeEach(async () => {
     submissionDraftStore.clearDraft();
@@ -109,7 +127,7 @@ describe('HandAI Flow, Image Lifecycle & Analytics Suite', () => {
   });
 
   describe('Bug 5: Recognition Accuracy Analytics Dashboard Store', () => {
-    it('initializes with benchmark trend sessions (Session 1: 82%, Session 2: 88%, Session 3: 91%)', async () => {
+    it('keeps benchmark sample sessions separate from the live summary', async () => {
       await handAiAnalyticsStore.init();
       const sessions = handAiAnalyticsStore.getSessions();
       expect(sessions.length).toBeGreaterThanOrEqual(3);
@@ -119,9 +137,10 @@ describe('HandAI Flow, Image Lifecycle & Analytics Suite', () => {
       expect(sessions[2].accuracy).toBe(91);
 
       const summary = handAiAnalyticsStore.getSummary();
-      expect(summary.accuracyPercent).toBeGreaterThan(80);
-      expect(summary.averageConfidence).toBeGreaterThan(80);
-      expect(summary.totalSessions).toBe(sessions.length);
+      expect(sessions.every((session) => session.isSampleData === true)).toBe(true);
+      expect(summary.totalSessions).toBe(0);
+      expect(summary.totalLinesProcessed).toBe(0);
+      expect(handAiAnalyticsStore.getGlobalAnalytics().confidenceCalibration).toEqual([]);
     });
 
     it('correctly calculates accuracy %, confidence, and source distribution when recording a new trial', async () => {
@@ -181,6 +200,11 @@ describe('HandAI Flow, Image Lifecycle & Analytics Suite', () => {
         ],
       };
 
+      addReferenceAnswers(mockTrial, {
+        line_1: 'Đạo hàm của sin(x) là cos(x)', line_2: 'Tích phân từ 0 đến 1',
+        line_3: 'x² + 2x + 1 = 0', line_4: 'Nghiệm kép x = -1',
+      });
+      addMeasuredOcrScores(mockTrial, { line_1: 0.95, line_2: 0.90, line_3: 0.85, line_4: 0.94 });
       const session = await handAiAnalyticsStore.recordTrial(mockTrial);
 
       expect(session.sessionId).toBe('test_trial_live_1');
@@ -191,6 +215,7 @@ describe('HandAI Flow, Image Lifecycle & Analytics Suite', () => {
       expect(session.crnnRawCount).toBe(2);
       expect(session.aiCorrectionCount).toBe(1);
       expect(session.manualEditCount).toBe(1);
+      expect(session.averageConfidence).toBe(91);
 
       const updatedSessions = handAiAnalyticsStore.getSessions();
       expect(updatedSessions.length).toBe(initialCount + 1);
@@ -235,6 +260,8 @@ describe('HandAI Flow, Image Lifecycle & Analytics Suite', () => {
         lines: lines as any,
       };
 
+      addReferenceAnswers(mockTrial, { '1': 'Line 1', '2': 'Line 2', '3': 'Line 3', '4': 'Line 4',
+        '5': 'Line 5', '6': 'Line 6', '7': 'Line 7', '8': 'Line 8' });
       const analytics = handAiAnalyticsStore.computeTrialAnalytics(mockTrial, true);
       expect(analytics.totalLines).toBe(8);
       expect(analytics.rawCorrect).toBe(6);
@@ -298,6 +325,7 @@ describe('HandAI Flow, Image Lifecycle & Analytics Suite', () => {
         ] as any,
       };
 
+      addReferenceAnswers(mockTrialWithEmpty, { '1': 'Học toán vui', '3': '2 + 3 = 5' });
       const analytics = handAiAnalyticsStore.computeTrialAnalytics(mockTrialWithEmpty, true);
       // Line 2 is empty, so only 2 valid lines
       expect(analytics.evaluatedLines).toBe(2);
@@ -367,6 +395,7 @@ describe('HandAI Flow, Image Lifecycle & Analytics Suite', () => {
         ] as any,
       };
 
+      addReferenceAnswers(trialWithMixedCorrections, { l1: 'Toán lớp 5', l2: 'Bài tập 2', l3: '10 + x = 20', l4: 'Dòng đúng' });
       const trialAnalytics = handAiAnalyticsStore.computeTrialAnalytics(trialWithMixedCorrections, true);
 
       // Total evaluated lines = 4
@@ -421,6 +450,7 @@ describe('HandAI Flow, Image Lifecycle & Analytics Suite', () => {
         ] as any,
       };
 
+      addReferenceAnswers(trialFunnel, { f1: 'Line 1', f2: 'Line 2 fixed' });
       const analytics = handAiAnalyticsStore.computeTrialAnalytics(trialFunnel, true);
       expect(analytics.funnel).toBeDefined();
       expect(analytics.funnel.inputStage).toBe('IMAGE INPUT');
@@ -452,6 +482,8 @@ describe('HandAI Flow, Image Lifecycle & Analytics Suite', () => {
         ] as any,
       };
 
+      addReferenceAnswers(trialBins, { b1: 'High conf', b2: 'Med-high conf', b3: 'Med conf correct', b4: 'Low conf' });
+      addMeasuredOcrScores(trialBins, { b1: 0.95, b2: 0.85, b3: 0.75, b4: 0.60 });
       const analytics = handAiAnalyticsStore.computeTrialAnalytics(trialBins, true);
       expect(analytics.confidenceReliability).toBeDefined();
       expect(analytics.confidenceReliability.length).toBe(4);
@@ -484,6 +516,7 @@ describe('HandAI Flow, Image Lifecycle & Analytics Suite', () => {
         ] as any,
       };
 
+      addReferenceAnswers(trial, { e1: 'Chào mừng HandAI' });
       const analytics = handAiAnalyticsStore.computeTrialAnalytics(trial, true);
       const jsonStr = exportTrialToJson(analytics);
       expect(typeof jsonStr).toBe('string');
@@ -710,6 +743,7 @@ describe('HandAI Flow, Image Lifecycle & Analytics Suite', () => {
             isCorrect: false,
             correctionType: 'AI_CORRECTED',
             evaluationStatus: 'EVALUATED',
+            groundTruthStatus: 'EXPLICIT',
             status: 'Accepted',
           },
           // Missing character error: length < ground truth
@@ -724,6 +758,7 @@ describe('HandAI Flow, Image Lifecycle & Analytics Suite', () => {
             isCorrect: false,
             correctionType: 'AI_CORRECTED',
             evaluationStatus: 'EVALUATED',
+            groundTruthStatus: 'EXPLICIT',
             status: 'Accepted',
           },
           // Similar character confusion (0 vs O)
@@ -738,6 +773,7 @@ describe('HandAI Flow, Image Lifecycle & Analytics Suite', () => {
             isCorrect: false,
             correctionType: 'AI_CORRECTED',
             evaluationStatus: 'EVALUATED',
+            groundTruthStatus: 'EXPLICIT',
             status: 'Accepted',
           },
           // Low quality image error: confidence < 65%
@@ -751,6 +787,7 @@ describe('HandAI Flow, Image Lifecycle & Analytics Suite', () => {
             isCorrect: false,
             correctionType: 'MANUAL_CORRECTED',
             evaluationStatus: 'EVALUATED',
+            groundTruthStatus: 'EXPLICIT',
             status: 'Detection Failed',
           },
         ];
@@ -799,6 +836,7 @@ describe('HandAI Flow, Image Lifecycle & Analytics Suite', () => {
           ],
         };
 
+        addReferenceAnswers(mockTrial, { l1: 'sin(x)^2 + cos(x)^2 = 1', l2: 'lim x->0 sin(x)/x = 1' });
         const trialAnalytics = handAiAnalyticsStore.computeTrialAnalytics(mockTrial, true);
 
         // Recognition Quality Report fields
@@ -871,6 +909,7 @@ describe('HandAI Flow, Image Lifecycle & Analytics Suite', () => {
           ],
         };
 
+        addReferenceAnswers(mockTrial, { l1: 'E = mc^2' });
         const analytics = handAiAnalyticsStore.computeTrialAnalytics(mockTrial, true);
 
         // JSON check
@@ -1029,6 +1068,15 @@ describe('HandAI Flow, Image Lifecycle & Analytics Suite', () => {
 
       it('Global Analytics calculates Average WER and provides WER trend chart for completed sessions', async () => {
         await handAiAnalyticsStore.init();
+        await handAiAnalyticsStore.clearAllSessions();
+        const references = ['a b c d e', 'a b c d e f g h i j k l m n o p q r s t', 'a b c d e f g h i j k l m n o p q r s t u v w x y'];
+        const predictions = ['x b c d e', 'x y z d e f g h i j k l m n o p q r s t', 'x y c d e f g h i j k l m n o p q r s t u v w x y'];
+        for (let i = 0; i < references.length; i++) {
+          await handAiAnalyticsStore.completeTrial({ trialId: `wer-${i}`, lines: [{ lineId: 'line-1',
+            rawOcrText: predictions[i], currentText: predictions[i], groundTruth: references[i],
+            rawOcrConfidence: 0.9, rawOcrConfidenceSource: 'CRNN_CTC_SOFTMAX' }],
+          } as any);
+        }
         const globalData = handAiAnalyticsStore.getGlobalAnalytics();
 
         expect(globalData.hasCompletedSessions).toBe(true);
@@ -1039,17 +1087,17 @@ describe('HandAI Flow, Image Lifecycle & Analytics Suite', () => {
         expect(globalData.werTrend).toBeDefined();
         expect(globalData.werTrend.length).toBeGreaterThanOrEqual(3);
 
-        const s1 = globalData.werTrend.find((t) => t.label === 'Session 1');
-        const s2 = globalData.werTrend.find((t) => t.label === 'Session 2');
-        const s3 = globalData.werTrend.find((t) => t.label === 'Session 3');
+        const s1 = globalData.werTrend.find((t) => t.sessionId === 'wer-0');
+        const s2 = globalData.werTrend.find((t) => t.sessionId === 'wer-1');
+        const s3 = globalData.werTrend.find((t) => t.sessionId === 'wer-2');
 
         expect(s1?.wer).toBe(20);
         expect(s2?.wer).toBe(15);
         expect(s3?.wer).toBe(8);
 
-        // Average of benchmark sessions: (20 + 15 + 8) / 3 = 14.3%
-        expect(globalData.globalWer).toBe(14.3);
-        expect(globalData.globalWordAccuracy).toBe(85.7);
+        // Six word edits across 50 independently referenced words: 12%.
+        expect(globalData.globalWer).toBe(12);
+        expect(globalData.globalWordAccuracy).toBe(88);
       });
 
       it('Trial export includes WER and Word Accuracy in both JSON and CSV', () => {
@@ -1161,6 +1209,13 @@ describe('HandAI Flow, Image Lifecycle & Analytics Suite', () => {
       // CASE 5: Global aggregation and error chart updates
       it('CASE 5: Global aggregation computes error dashboard, top confusion pairs, and error trend', async () => {
         await handAiAnalyticsStore.init();
+        await handAiAnalyticsStore.clearAllSessions();
+        await handAiAnalyticsStore.completeTrial({ trialId: 'actual-errors', lines: [
+          { lineId: 'tone', rawOcrText: 'mua', currentText: 'mua', groundTruth: 'mùa', rawOcrConfidence: 0.9, rawOcrConfidenceSource: 'CRNN_CTC_SOFTMAX' },
+          { lineId: 'similar', rawOcrText: 'n', currentText: 'n', groundTruth: 'm', rawOcrConfidence: 0.9, rawOcrConfidenceSource: 'CRNN_CTC_SOFTMAX' },
+          { lineId: 'missing', rawOcrText: 'ho', currentText: 'ho', groundTruth: 'hoa', rawOcrConfidence: 0.9, rawOcrConfidenceSource: 'CRNN_CTC_SOFTMAX' },
+          { lineId: 'quality', rawOcrText: 'abc', currentText: 'abc', groundTruth: 'xyz', rawOcrConfidence: 0.5, rawOcrConfidenceSource: 'CRNN_CTC_SOFTMAX' },
+        ] } as any);
         const globalData = handAiAnalyticsStore.getGlobalAnalytics();
 
         expect(globalData.hasCompletedSessions).toBe(true);
@@ -1171,23 +1226,21 @@ describe('HandAI Flow, Image Lifecycle & Analytics Suite', () => {
 
         // Error Distribution Chart metrics
         const dist = globalData.errorDashboard.distribution;
-        expect(dist.vietnameseTone.percentage).toBe(35);
+        expect(dist.vietnameseTone.percentage).toBe(25);
         expect(dist.similarCharacter.percentage).toBe(25);
-        expect(dist.missingCharacter.percentage).toBe(20);
-        expect(dist.lowImageQuality.percentage).toBe(20);
+        expect(dist.missingCharacter.percentage).toBe(25);
+        expect(dist.lowImageQuality.percentage).toBe(25);
 
         // Top Confusion Pairs
-        expect(globalData.errorDashboard.topConfusionPairs.length).toBeGreaterThanOrEqual(3);
+        expect(globalData.errorDashboard.topConfusionPairs.length).toBe(1);
         const topPair = globalData.errorDashboard.topConfusionPairs[0];
         expect(topPair.wrongCharacter).toBe('n');
         expect(topPair.correctCharacter).toBe('m');
-        expect(topPair.count).toBe(12);
+        expect(topPair.count).toBe(1);
 
         // Error Trend
-        expect(globalData.errorDashboard.errorTrend.length).toBeGreaterThanOrEqual(3);
-        expect(globalData.errorDashboard.errorTrend[0].errorRate).toBe(18.2);
-        expect(globalData.errorDashboard.errorTrend[1].errorRate).toBe(12.5);
-        expect(globalData.errorDashboard.errorTrend[2].errorRate).toBe(8.3);
+        expect(globalData.errorDashboard.errorTrend).toHaveLength(1);
+        expect(globalData.errorDashboard.errorTrend[0].errorRate).toBe(100);
       });
 
       // Trial error summary & recommendation
@@ -1507,7 +1560,7 @@ describe('HandAI Flow, Image Lifecycle & Analytics Suite', () => {
         });
       });
 
-      it('AUDIT 2 - Metric Validation: no NaN, Infinity, or division by zero in any metric formula', () => {
+      it('AUDIT 2 - Metric Validation: finite edit formulas and explicit unavailable values without reference data', () => {
         // Empty inputs
         const emptyCer = calculateCer('', '');
         expect(isNaN(emptyCer.cer)).toBe(false);
@@ -1540,12 +1593,15 @@ describe('HandAI Flow, Image Lifecycle & Analytics Suite', () => {
           lines: [],
         };
         const emptyAnalytics = handAiAnalyticsStore.computeTrialAnalytics(emptyTrial, true);
-        expect(isNaN(emptyAnalytics.rawAccuracy)).toBe(false);
-        expect(isNaN(emptyAnalytics.finalAccuracy)).toBe(false);
+        expect(isNaN(emptyAnalytics.rawAccuracy)).toBe(true);
+        expect(isNaN(emptyAnalytics.finalAccuracy)).toBe(true);
         expect(isNaN(emptyAnalytics.cer)).toBe(false);
         expect(isNaN(emptyAnalytics.wer)).toBe(false);
-        expect(isNaN(emptyAnalytics.characterAccuracy)).toBe(false);
-        expect(isNaN(emptyAnalytics.wordAccuracy)).toBe(false);
+        expect(isNaN(emptyAnalytics.characterAccuracy)).toBe(true);
+        expect(isNaN(emptyAnalytics.wordAccuracy)).toBe(true);
+        const exported = JSON.parse(exportTrialToJson(emptyAnalytics));
+        expect(exported.metrics.rawAccuracy).toBeNull();
+        expect(exported.metrics.finalAccuracy).toBeNull();
       });
 
       it('AUDIT 3 - Analytics Validation: Error Dashboard ignores SKIPPED lines and model tracker filters invalid experiments', () => {
@@ -1588,6 +1644,10 @@ describe('HandAI Flow, Image Lifecycle & Analytics Suite', () => {
 
       it('AUDIT 4 - Dynamic Global CER: dynamically aggregates CER and Character Accuracy from completed sessions without hardcoding', async () => {
         await handAiAnalyticsStore.init();
+        await handAiAnalyticsStore.completeTrial({ trialId: 'actual-cer', lines: [
+          { lineId: 'l1', rawOcrText: 'abc', currentText: 'abc', groundTruth: 'adc' },
+          { lineId: 'l2', rawOcrText: 'hello', currentText: 'hello', groundTruth: 'hello' },
+        ] } as any);
         const global = handAiAnalyticsStore.getGlobalAnalytics();
 
         expect(typeof global.globalCer).toBe('number');
@@ -1598,6 +1658,7 @@ describe('HandAI Flow, Image Lifecycle & Analytics Suite', () => {
         expect(isNaN(global.globalCharacterAccuracy)).toBe(false);
         expect(isFinite(global.globalCharacterAccuracy)).toBe(true);
         expect(global.globalCharacterAccuracy + global.globalCer).toBeCloseTo(100, 0);
+        expect(global.globalCer).toBe(12.5); // One edit among eight referenced characters.
       });
     });
 
@@ -1672,6 +1733,7 @@ describe('HandAI Flow, Image Lifecycle & Analytics Suite', () => {
           ],
         };
 
+        addReferenceAnswers(sampleTrial, { l1: 'Cộng hòa xã hội', l2: 'Chủ nghĩa Việt Nam' });
         const { session, analytics } = await handAiAnalyticsStore.completeTrial(sampleTrial);
 
         // Verification of session fields
@@ -1738,6 +1800,12 @@ describe('HandAI Flow, Image Lifecycle & Analytics Suite', () => {
         ] as any,
       };
 
+      addReferenceAnswers(trial8Lines, {
+        l1: 'Cộng hòa xã hội chủ nghĩa Việt Nam', l2: 'Độc lập Tự do Hạnh phúc',
+        l3: 'Bài tập toán lớp 3', l4: 'Phép tính nhân và chia', l5: 'Học sinh Nguyễn Văn An',
+        l6: 'Trường Tiểu học Thăng Long', l7: 'Điểm số mười', l8: 'Khen ngợi học sinh giỏi',
+      });
+      addMeasuredOcrScores(trial8Lines, { l1: 0.95, l2: 0.94, l3: 0.92, l4: 0.91, l5: 0.89, l6: 0.93, l7: 0.78, l8: 0.81 });
       const trialAnalytics = handAiAnalyticsStore.computeTrialAnalytics(trial8Lines, true);
 
       // 1. Trial Metadata
@@ -1884,8 +1952,9 @@ describe('HandAI Flow, Image Lifecycle & Analytics Suite', () => {
 
     // Case 3: Restart app. Kiểm tra: Data vẫn tồn tại.
     it('Case 3: Restart app -> Stored sessions and analytics data persist across app restarts', async () => {
-      const restartTrial: MultilineTrialResult = {
+      const restartTrial: MultilineTrialResult & { imageUri: string } = {
         trialId: 'phase2_restart_test',
+        imageUri: 'data:image/png;base64,fixture-image',
         source: 'GALLERY',
         pageImageObjectKey: 'restart_test.jpg',
         pageImageSha256: 'sha256_restart',
@@ -1901,6 +1970,8 @@ describe('HandAI Flow, Image Lifecycle & Analytics Suite', () => {
         ] as any,
       };
 
+      addReferenceAnswers(restartTrial, { r1: 'Dữ liệu bền vững sau khởi động' });
+      addMeasuredOcrScores(restartTrial, { r1: 0.97 });
       await handAiAnalyticsStore.completeTrial(restartTrial);
       const preRestartGlobal = handAiAnalyticsStore.getGlobalAnalytics();
       expect(preRestartGlobal.totalSessions).toBeGreaterThan(0);
@@ -1919,6 +1990,71 @@ describe('HandAI Flow, Image Lifecycle & Analytics Suite', () => {
       expect(loadedTrial?.trialId).toBe('phase2_restart_test');
 
       await handAiAnalyticsStore.reset();
+    });
+
+    it('retains independently entered references and the original photo when the same trial receives updated OCR and AI data', async () => {
+      await handAiAnalyticsStore.clearAllSessions();
+      const trial = {
+        trialId: 'reference-refresh', imageUri: 'data:image/png;base64,fixture-image',
+        lines: [{ lineId: 'saved-line', rawOcrText: 'mua', currentText: 'mua', selectedSource: 'OCR' }],
+      } as unknown as MultilineTrialResult;
+      const original = await handAiAnalyticsStore.completeTrial(trial);
+      await handAiAnalyticsStore.setReferenceText(trial.trialId, 'saved-line', 'mùa');
+
+      const refreshed = await handAiAnalyticsStore.completeTrial({
+        trialId: trial.trialId,
+        lines: [{ lineId: 'saved-line', rawOcrText: 'múa', predictedText: 'múa', currentText: 'múa', selectedSource: 'OCR',
+          groqSuggestion: 'mùa', groqStatus: 'SUCCESS', groqModel: 'actual-provider-model',
+          suggestions: [{ provider: 'GROQ', model: 'actual-provider-model', text: 'mùa', status: 'SUCCESS' }] },
+        { lineId: 'new-line', rawOcrText: 'đồi', currentText: 'đồi', selectedSource: 'OCR' }],
+      } as unknown as MultilineTrialResult);
+
+      expect(refreshed.session.imageUri).toBe(original.session.imageUri);
+      expect(refreshed.analytics.lineMetrics[0]).toMatchObject({ groundTruth: 'mùa', groundTruthStatus: 'EXPLICIT',
+        evaluationStatus: 'EVALUATED', ocrOutput: 'múa', finalText: 'múa', afterAiText: 'mùa', aiReviewRecorded: true });
+      expect(refreshed.analytics.lineMetrics[1]).toMatchObject({ groundTruth: '', groundTruthStatus: 'MISSING', evaluationStatus: 'PENDING' });
+      expect(handAiAnalyticsStore.getSessions()).toHaveLength(1);
+
+      const restarted = new HandAiAnalyticsStore();
+      await restarted.init();
+      expect(restarted.getSessions()[0].lineMetrics![0].groundTruth).toBe('mùa');
+      expect(restarted.getSessions()[0].imageUri).toBe(original.session.imageUri);
+      await restarted.setReferenceText(trial.trialId, 'saved-line', '');
+      const withoutReference = await restarted.completeTrial(trial);
+      expect(withoutReference.analytics.lineMetrics[0]).toMatchObject({ groundTruth: '', groundTruthStatus: 'MISSING' });
+
+      const anotherTrial = await restarted.completeTrial({ ...trial, trialId: 'different-trial' });
+      expect(anotherTrial.analytics.lineMetrics[0]).toMatchObject({ groundTruth: '', groundTruthStatus: 'MISSING' });
+    });
+
+    it('confirms existing final text without retyping and records only changed text as a manual edit', async () => {
+      await handAiAnalyticsStore.clearAllSessions();
+      await handAiAnalyticsStore.completeTrial({
+        trialId: 'final-review', imageUri: 'data:image/png;base64,review-image',
+        lines: [
+          { lineId: 'ai-line', lineOrder: 1, rawOcrText: 'EEm yêu mùa hè', predictedText: 'EEm yêu mùa hè',
+            currentText: 'Em yêu mùa hè', finalText: 'Em yêu mùa hè', selectedSource: 'AI',
+            groqSuggestion: 'Em yêu mùa hè', groqStatus: 'SUCCESS', groqModel: 'actual-provider-model',
+            suggestions: [{ provider: 'GROQ', model: 'actual-provider-model', text: 'Em yêu mùa hè', status: 'SUCCESS' }] },
+          { lineId: 'ocr-line', lineOrder: 2, rawOcrText: 'Có hoa sim tím', predictedText: 'Có hoa sim tím',
+            currentText: 'Có hoa sim tím', finalText: 'Có hoa sim tím', selectedSource: 'OCR' },
+        ],
+      } as unknown as MultilineTrialResult);
+
+      expect(await handAiAnalyticsStore.confirmAllFinalTexts('final-review')).toBe(2);
+      let stored = handAiAnalyticsStore.getSessions().find((item) => item.sessionId === 'final-review')!;
+      expect(stored.lineMetrics).toEqual(expect.arrayContaining([
+        expect.objectContaining({ lineId: 'ai-line', groundTruth: 'Em yêu mùa hè', evaluationStatus: 'EVALUATED', decisionSource: 'AI_CORRECTION' }),
+        expect.objectContaining({ lineId: 'ocr-line', groundTruth: 'Có hoa sim tím', evaluationStatus: 'EVALUATED', decisionSource: 'CRNN_RAW' }),
+      ]));
+      expect(await handAiAnalyticsStore.confirmAllFinalTexts('final-review')).toBe(0);
+
+      await handAiAnalyticsStore.reviewFinalText('final-review', 'ocr-line', 'Có hoa sim tím.');
+      stored = handAiAnalyticsStore.getSessions().find((item) => item.sessionId === 'final-review')!;
+      expect(stored.lineMetrics!.find((line) => line.lineId === 'ocr-line')).toMatchObject({
+        finalText: 'Có hoa sim tím.', groundTruth: 'Có hoa sim tím.', evaluationStatus: 'EVALUATED',
+        decisionSource: 'MANUAL_EDIT', source: 'MANUAL', status: 'Manual', isFinalCorrect: true,
+      });
     });
   });
 
@@ -2031,6 +2167,7 @@ describe('HandAI Flow, Image Lifecycle & Analytics Suite', () => {
         ],
       };
 
+      addMeasuredOcrScores(trial, { line_c2_high_conf: 0.95 });
       const trialAnalytics = handAiAnalyticsStore.computeTrialAnalytics(trial, true);
 
       // Verify 5-bin confidence calibration
@@ -2123,6 +2260,7 @@ describe('HandAI Flow, Image Lifecycle & Analytics Suite', () => {
         ],
       };
 
+      addMeasuredOcrScores(trial, { line_err_crnn: 0.92, line_err_ai: 0.85, line_err_img: 0.45 });
       const trialAnalytics = handAiAnalyticsStore.computeTrialAnalytics(trial, true);
 
       // Root causes must be stored
@@ -2188,7 +2326,14 @@ describe('HandAI Flow, Image Lifecycle & Analytics Suite', () => {
 
       // 7. Confidence Calibration
       expect(report).toContain('## 7. Confidence Calibration');
-      expect(report).toContain('90-100%');
+      expect(global.confidenceCalibration).toEqual([]);
+      expect(report).toContain('Scores remain uncalibrated');
+      expect(report).not.toContain('yields ≥95% accuracy');
+      expect(report).not.toContain('Academic Defense Verification Ready');
+      expect(report).toContain('**CRNN Raw Accuracy**: Unavailable');
+      expect(report).toContain('**OCR Error Rescue Rate**: Unavailable');
+      expect(report).not.toContain('NaN');
+      expect(report).not.toContain('Infinity');
 
       // 8. Error Analysis & Root Cause Classification
       expect(report).toContain('## 8. Error Analysis & Root Cause Classification');
@@ -2597,7 +2742,7 @@ describe('HandAI Flow, Image Lifecycle & Analytics Suite', () => {
             currentText: 'Hello',
             confidence: 0.95,
             selectedSource: 'OCR',
-            // Missing verdict, missing groundTruth -> FALLBACK
+            // Missing verdict and groundTruth remain unavailable.
             trainingEligible: true,
             // @ts-ignore
             groundTruth: '',
@@ -2608,10 +2753,12 @@ describe('HandAI Flow, Image Lifecycle & Analytics Suite', () => {
       const analytics = handAiAnalyticsStore.computeTrialAnalytics(trial, true);
       const metric = analytics.lineMetrics[0];
 
-      expect(metric.groundTruthStatus).toBe('FALLBACK');
+      expect(metric.groundTruthStatus).toBe('MISSING');
       expect(analytics.evaluatedLines).toBe(0); // Excluded from metrics
-      expect(analytics.rawAccuracy).toBe(0); // 0 / 0
-      expect(analytics.finalAccuracy).toBe(0);
+      expect(Number.isNaN(analytics.rawAccuracy)).toBe(true);
+      expect(Number.isNaN(analytics.finalAccuracy)).toBe(true);
+      expect(metric.isRawCorrect).toBe(false);
+      expect(metric.isFinalCorrect).toBe(false);
     });
 
     it('TC3: Export contains metricVersion and groundTruthStatus', () => {
